@@ -1,0 +1,72 @@
+### MyNaksh Shared Brain — replays the §13 walkthrough (VS Code "REST Client" / JetBrains HTTP client)
+@host = http://localhost:8000
+@user = user-123
+
+### Health
+GET {{host}}/health
+
+### Row 1 — profile + goal in one message (sync_memory so the next request can see the write)
+POST {{host}}/chat
+Content-Type: application/json
+
+{"user_id": "{{user}}", "session_id": "session-456", "message": "My name is Rahul, born 15 Aug 1995 in Delhi. Planning to switch jobs next year.", "sync_memory": true}
+
+### Profile derived from the message (sign = Leo)
+GET {{host}}/users/{{user}}
+
+### Stored memories (goal career_change, target_year 2027, conf 0.9)
+GET {{host}}/users/{{user}}/memories
+
+### Row 2 — career question → memory:career_change prefetched
+POST {{host}}/chat
+Content-Type: application/json
+
+{"user_id": "{{user}}", "session_id": "session-456", "message": "What should I focus on for my career?"}
+
+### Row 3 — follow-up → route followup, recent turns only
+POST {{host}}/chat
+Content-Type: application/json
+
+{"user_id": "{{user}}", "session_id": "session-456", "message": "Why do you say that?"}
+
+### Row 4 — NEW session → memory_recall still finds the goal
+POST {{host}}/chat
+Content-Type: application/json
+
+{"user_id": "{{user}}", "session_id": "session-789", "message": "What do you remember about my career goals?"}
+
+### Row 5 — correction → SUPERSEDE (target_year 2026)
+POST {{host}}/chat
+Content-Type: application/json
+
+{"user_id": "{{user}}", "session_id": "session-789", "message": "Actually I'll switch this year, not next.", "sync_memory": true}
+
+### History incl. superseded memory and SUPERSEDES link
+GET {{host}}/users/{{user}}/memories?status=all
+
+### Row 6 — time-bound goal (valid_until end of next month)
+POST {{host}}/chat
+Content-Type: application/json
+
+{"user_id": "{{user}}", "session_id": "session-789", "message": "I have a PM interview next month.", "sync_memory": true}
+
+### Row 7 — Hinglish → language hinglish, nothing stored
+POST {{host}}/chat
+Content-Type: application/json
+
+{"user_id": "{{user}}", "session_id": "session-789", "message": "Meri shaadi kab hogi?"}
+
+### Explicit memory command
+POST {{host}}/chat
+Content-Type: application/json
+
+{"user_id": "{{user}}", "session_id": "session-789", "message": "Remember that I love classical music"}
+
+### Ephemeral chat: reads memory, writes nothing
+POST {{host}}/chat
+Content-Type: application/json
+
+{"user_id": "{{user}}", "session_id": "scratch", "message": "I might move to Pune next year. Good time for a change?", "ephemeral": true}
+
+### Right-to-forget
+# DELETE {{host}}/users/{{user}}/memories/<memory_id>

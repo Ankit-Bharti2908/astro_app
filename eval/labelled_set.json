@@ -1,0 +1,340 @@
+[
+ {
+  "id": 1,
+  "message": "My name is Rahul, born 15 Aug 1995 in Delhi. Planning to switch jobs next year.",
+  "store": true,
+  "expected": [
+   {
+    "key": "name",
+    "type": "profile_fact",
+    "certainty": "explicit",
+    "subject": "self"
+   },
+   {
+    "key": "dob",
+    "type": "profile_fact",
+    "certainty": "explicit",
+    "subject": "self"
+   },
+   {
+    "key": "birth_place",
+    "type": "profile_fact",
+    "certainty": "explicit",
+    "subject": "self"
+   },
+   {
+    "key": "career_change",
+    "type": "goal",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 2,
+  "message": "What should I focus on for my career?",
+  "store": false,
+  "expected": []
+ },
+ {
+  "id": 3,
+  "message": "Why do you say that?",
+  "store": false,
+  "expected": []
+ },
+ {
+  "id": 4,
+  "message": "Actually I'll switch this year, not next.",
+  "context": "You plan to switch jobs in 2027.",
+  "store": true,
+  "expected": [
+   {
+    "key": "career_change",
+    "type": "goal",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 5,
+  "message": "I have a PM interview next month.",
+  "store": true,
+  "expected": [
+   {
+    "key": "pm_interview",
+    "type": "goal",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 6,
+  "message": "Meri shaadi kab hogi?",
+  "store": false,
+  "expected": []
+ },
+ {
+  "id": 7,
+  "message": "If I ever moved to Canada, what would change?",
+  "store": false,
+  "expected": [
+   {
+    "key": "relocation",
+    "type": "life_event",
+    "certainty": "hypothetical",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 8,
+  "message": "My brother is planning to switch jobs next year.",
+  "store": false,
+  "expected": [
+   {
+    "key": "career_change",
+    "type": "goal",
+    "certainty": "explicit",
+    "subject": "other"
+   }
+  ]
+ },
+ {
+  "id": 9,
+  "message": "I love classical music.",
+  "store": true,
+  "expected": [
+   {
+    "key": "classical_music",
+    "type": "interest",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 10,
+  "message": "I prefer morning meetings.",
+  "store": true,
+  "expected": [
+   {
+    "key": "morning_meetings",
+    "type": "preference",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 11,
+  "message": "Maybe I'll switch jobs next year, not sure yet.",
+  "store": true,
+  "expected": [
+   {
+    "key": "career_change",
+    "type": "goal",
+    "certainty": "hedged",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 12,
+  "message": "I have diabetes, does Saturn affect health?",
+  "store": false,
+  "expected": [
+   {
+    "key": "health_diabetes",
+    "type": "life_event",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 13,
+  "message": "My salary is ₹50,000 a month. Will I get a raise?",
+  "store": false,
+  "expected": [
+   {
+    "key": "income_detail",
+    "type": "profile_fact",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 14,
+  "message": "Thanks, that was helpful!",
+  "store": false,
+  "expected": []
+ },
+ {
+  "id": 15,
+  "message": "Please reply in Hindi from now on.",
+  "store": true,
+  "expected": [
+   {
+    "key": "preferred_language",
+    "type": "profile_fact",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 16,
+  "message": "I moved to Bangalore last month.",
+  "store": true,
+  "expected": [
+   {
+    "key": "relocation",
+    "type": "life_event",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 17,
+  "message": "I got married in February.",
+  "store": true,
+  "expected": [
+   {
+    "key": "marriage",
+    "type": "life_event",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 18,
+  "message": "Mujhe agle saal naukri badalni hai.",
+  "store": true,
+  "expected": [
+   {
+    "key": "career_change",
+    "type": "goal",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 19,
+  "message": "I'm feeling a bit low today.",
+  "store": false,
+  "expected": []
+ },
+ {
+  "id": 20,
+  "message": "Tell me about Mercury retrograde.",
+  "store": false,
+  "expected": []
+ },
+ {
+  "id": 21,
+  "message": "I enjoy trekking in the Himalayas.",
+  "store": true,
+  "expected": [
+   {
+    "key": "trekking_in_the_himalayas",
+    "type": "interest",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 22,
+  "message": "What if I started my own business?",
+  "store": false,
+  "expected": []
+ },
+ {
+  "id": 23,
+  "message": "Remember that I prefer evening consultations.",
+  "store": true,
+  "expected": [
+   {
+    "key": "evening_consultations",
+    "type": "preference",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 24,
+  "message": "My wife has thyroid issues, any remedies?",
+  "store": false,
+  "expected": []
+ },
+ {
+  "id": 25,
+  "message": "Is tomorrow auspicious for signing a contract?",
+  "store": false,
+  "expected": []
+ },
+ {
+  "id": 26,
+  "message": "I was born 2 January 1990 in Mumbai.",
+  "store": true,
+  "expected": [
+   {
+    "key": "dob",
+    "type": "profile_fact",
+    "certainty": "explicit",
+    "subject": "self"
+   },
+   {
+    "key": "birth_place",
+    "type": "profile_fact",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 27,
+  "message": "I'm thinking of changing jobs, but nothing decided.",
+  "store": true,
+  "expected": [
+   {
+    "key": "career_change",
+    "type": "goal",
+    "certainty": "hedged",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 28,
+  "message": "Good morning!",
+  "store": false,
+  "expected": []
+ },
+ {
+  "id": 29,
+  "message": "I have a job interview next week.",
+  "store": true,
+  "expected": [
+   {
+    "key": "job_interview",
+    "type": "goal",
+    "certainty": "explicit",
+    "subject": "self"
+   }
+  ]
+ },
+ {
+  "id": 30,
+  "message": "My friend thinks I should invest in gold.",
+  "store": false,
+  "expected": []
+ }
+]
