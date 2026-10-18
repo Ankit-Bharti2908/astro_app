@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Any, Literal
 
@@ -17,6 +18,23 @@ LIFE_AREAS: tuple[str, ...] = (
     "spirituality",
 )
 GENERAL_AREA = "general"
+
+
+def recall_areas(life_areas: Sequence[str] | None) -> list[str] | None:
+    """Widen a life-area-narrowed read with the catch-all bucket.
+
+    `general` is where extraction files anything it could not confidently place. A read that
+    matches the area exactly therefore turns every misfiling into permanent amnesia: the brain
+    answers "I have nothing on that" while the fact sits one bucket away, and no later turn can
+    ever reach it. Narrowing is an optimisation, so it may only ever drop memories that are
+    definitely about something else — and `general` never is (§7).
+
+    Read paths that narrow use this; the REST filter stays exact, since there the caller asked
+    for one specific bucket.
+    """
+    if not life_areas:
+        return None
+    return list(dict.fromkeys([*life_areas, GENERAL_AREA]))
 
 MemoryType = Literal["goal", "preference", "interest", "life_event", "profile_fact"]
 Certainty = Literal["explicit", "hedged", "hypothetical"]

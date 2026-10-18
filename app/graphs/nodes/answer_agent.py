@@ -7,7 +7,7 @@ import logging
 from langchain_core.messages import AIMessage
 
 from app.brain.errors import BrainUnavailable
-from app.brain.models import Memory
+from app.brain.models import Memory, recall_areas
 from app.brain.scoring import rank_memories
 from app.context.builder import build_context
 from app.graphs.deps import Deps
@@ -41,7 +41,7 @@ def make_answer_agent(deps: Deps):
             if not brain_down:
                 try:
                     areas = state.get("life_areas") or None
-                    all_mems = await deps.repo.list_memories(state["user_id"], life_areas=areas)
+                    all_mems = await deps.repo.list_memories(state["user_id"], life_areas=recall_areas(areas))
                     prefetched = rank_memories(all_mems, now, top_k=deps.settings.top_k_memories)
                 except BrainUnavailable as exc:
                     log.warning("prefetch failed: %s", exc)

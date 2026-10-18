@@ -91,6 +91,15 @@ async def test_irrelevant_memory_not_in_career_context(client, repo):
     assert "memory_index" in d["context_used"]  # L2 still tells the model the health memory exists
 
 
+async def test_general_bucket_is_never_invisible_to_a_narrowed_recall(repo, client):
+    """Extraction files what it cannot place under `general`. If a career-narrowed read matched
+    the area exactly, that misfiling would be permanent amnesia — the brain says "nothing stored"
+    while the fact sits one bucket away. Observed live: a `career_change` goal filed as `general`."""
+    await repo.add_memory("rahul", Memory(id="g1", type="goal", key="career_change", value="switch jobs", life_area="general", importance=0.9, created_at=FIXED_NOW, updated_at=FIXED_NOW))
+    d = chat(client, "What should I focus on for my career?")
+    assert "memory:career_change" in d["context_used"]
+
+
 # 7 ------------------------------------------------------------------------------
 def test_correction_supersedes_old_memory(client):
     chat(client, "Planning to switch jobs next year.")

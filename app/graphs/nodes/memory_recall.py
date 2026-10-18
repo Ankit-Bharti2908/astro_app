@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from app.brain.errors import BrainUnavailable
+from app.brain.models import recall_areas
 from app.brain.scoring import rank_memories
 from app.context.builder import build_context
 from app.graphs.deps import Deps
@@ -27,7 +28,7 @@ def make_memory_recall(deps: Deps):
             return final_reply(state, pick(RECALL_BRAIN_DOWN, language), context_used=[], context_tokens={})
         try:
             memories = rank_memories(
-                await deps.repo.list_memories(state["user_id"], life_areas=areas), now, top_k=deps.settings.top_k_memories * 2
+                await deps.repo.list_memories(state["user_id"], life_areas=recall_areas(areas)), now, top_k=deps.settings.top_k_memories * 2
             )
         except BrainUnavailable:
             return final_reply(state, pick(RECALL_BRAIN_DOWN, language), context_used=[], context_tokens={}, degraded=["brain_unavailable"])

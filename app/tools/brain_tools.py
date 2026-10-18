@@ -11,7 +11,7 @@ from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import InjectedState
 
 from app.brain.errors import BrainUnavailable
-from app.brain.models import LIFE_AREAS, UserProfile
+from app.brain.models import LIFE_AREAS, UserProfile, recall_areas
 from app.brain.repository import BrainRepository
 from app.brain.scoring import rank_memories
 from app.config import Settings
@@ -35,7 +35,7 @@ def make_tools(repo: BrainRepository, settings: Settings, clock: Callable[[], da
             return f"Unknown life area '{life_area}'. Use one of {', '.join(LIFE_AREAS)} or 'all'.", {}
         try:
             memories = rank_memories(
-                await repo.list_memories(user_id, life_areas=areas), clock(), top_k=settings.top_k_memories
+                await repo.list_memories(user_id, life_areas=recall_areas(areas)), clock(), top_k=settings.top_k_memories
             )
         except BrainUnavailable:
             return "The long-term memory store is unavailable right now.", {"degraded": ["brain_unavailable"]}
