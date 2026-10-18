@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "neo4j"
     neo4j_database: str = "neo4j"
+    # Fail fast so an outage becomes a degraded reply rather than a 30 s stall (§11)
+    neo4j_connect_timeout_s: float = 3.0
+    neo4j_max_retry_time_s: float = 5.0
 
     # LLM
     strong_model: str = "anthropic/claude-opus-5-5"

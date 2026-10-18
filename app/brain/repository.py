@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from app.brain.models import Memory, SessionRecord, UserProfile
+from app.brain.profile_validation import validate_profile_patch
 
 
 @runtime_checkable
@@ -64,9 +65,9 @@ def apply_profile_patch(profile: UserProfile, patch: dict[str, Any], now: dateti
     from app.profile.zodiac import sun_sign
 
     data = profile.model_dump()
-    for k, v in patch.items():
-        if k in {"name", "dob", "tob", "birth_place", "preferred_language"}:
-            data[k] = v
+    # Nothing unparseable may reach the User node: the chart is computed from it (§11).
+    clean, _rejected = validate_profile_patch(patch, today=now.date())
+    data.update(clean)
     updated = UserProfile(**data)
     updated.zodiac = sun_sign(updated.dob) if updated.dob else None
     updated.updated_at = now

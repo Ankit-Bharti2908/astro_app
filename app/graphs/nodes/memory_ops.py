@@ -19,6 +19,7 @@ from app.brain.models import (
     MemoryCandidate,
     ScoredCandidate,
 )
+from app.brain.profile_validation import validate_profile_patch
 from app.brain.repository import BrainRepository
 from app.brain.scoring import initial_confidence, initial_importance, reinforce
 from app.config import Settings
@@ -269,17 +270,9 @@ async def reconcile_candidate(
 
 # ---- write ----------------------------------------------------------------------
 
-def _profile_patch(c: ScoredCandidate) -> dict[str, Any]:
-    if c.key == "dob":
-        try:
-            return {"dob": date.fromisoformat(c.value[:10])}
-        except ValueError:
-            return {}
-    if c.key == "preferred_language":
-        v = c.value.strip().lower()
-        v = {"hindi": "hi", "english": "en"}.get(v, v)
-        return {"preferred_language": v}
-    return {c.key: c.value}
+def _profile_patch(c: ScoredCandidate, *, today: date) -> tuple[dict[str, Any], dict[str, str]]:
+    """The candidate as a validated profile patch, plus why any slot was refused."""
+    return validate_profile_patch({c.key: c.value}, today=today)
 
 
 async def apply_decision(
@@ -296,7 +289,10 @@ async def apply_decision(
     result: dict[str, Any] = {"action": action, "key": candidate.key, "value": candidate.value, "reason": decision.get("reason")}
 
     if action == "PROFILE":
-        patch = _profile_patch(candidate)
+        patch, rejected = _profile_patch(candidate, today=now.date())
+        if rejected:  # inadmissible value: refuse it loudly rather than storing a guess (§11)
+            result.update(action="SKIP", reason=rejected[candidate.key])
+            return result
         if patch:
             profile = await repo.update_user(user_id, patch, now=now)
             result["profile"] = profile.model_dump(mode="json")

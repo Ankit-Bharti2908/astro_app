@@ -9,7 +9,7 @@ from datetime import date, datetime
 from typing import Any
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
-from neo4j.exceptions import Neo4jError, ServiceUnavailable
+from neo4j.exceptions import DriverError, Neo4jError
 
 from app.brain.errors import BrainUnavailable
 from app.brain.models import (
@@ -108,23 +108,45 @@ def node_to_session(node: Any, user_id: str) -> SessionRecord:
 
 
 class Neo4jBrainRepository:
-    def __init__(self, uri: str, user: str | None, password: str | None, database: str = "neo4j") -> None:
+    def __init__(
+        self,
+        uri: str,
+        user: str | None,
+        password: str | None,
+        database: str = "neo4j",
+        *,
+        connect_timeout_s: float = 3.0,
+        max_retry_time_s: float = 5.0,
+    ) -> None:
         auth = (user, password) if user else None
+        # Fail fast so an outage becomes `degraded: ["brain_unavailable"]` instead of a 30 s+ stall (§11)
         self._driver: AsyncDriver = AsyncGraphDatabase.driver(
-            uri, auth=auth, notifications_min_severity="OFF"
+            uri,
+            auth=auth,
+            notifications_min_severity="OFF",
+            connection_timeout=connect_timeout_s,
+            connection_acquisition_timeout=connect_timeout_s * 2,
+            max_transaction_retry_time=max_retry_time_s,
         )
         self._database = database
 
     @classmethod
     def from_settings(cls, settings) -> Neo4jBrainRepository:
-        return cls(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password, settings.neo4j_database)
+        return cls(
+            settings.neo4j_uri,
+            settings.neo4j_user,
+            settings.neo4j_password,
+            settings.neo4j_database,
+            connect_timeout_s=settings.neo4j_connect_timeout_s,
+            max_retry_time_s=settings.neo4j_max_retry_time_s,
+        )
 
     # plumbing ------------------------------------------------------------
     async def _run(self, query: str, **params: Any) -> list[Any]:
         try:
             result = await self._driver.execute_query(query, parameters_=params, database_=self._database)
             return list(result.records)
-        except (ServiceUnavailable, Neo4jError, OSError) as exc:
+        except (Neo4jError, DriverError, OSError, TimeoutError) as exc:
             raise BrainUnavailable(str(exc)) from exc
 
     async def _write_many(self, statements: list[tuple[str, dict[str, Any]]]) -> list[Any]:
@@ -138,7 +160,7 @@ class Neo4jBrainRepository:
         try:
             async with self._driver.session(database=self._database) as session:
                 return await session.execute_write(work)
-        except (ServiceUnavailable, Neo4jError, OSError) as exc:
+        except (Neo4jError, DriverError, OSError, TimeoutError) as exc:
             raise BrainUnavailable(str(exc)) from exc
 
     async def ping(self) -> bool:
@@ -206,7 +228,10 @@ class Neo4jBrainRepository:
         return await self._write_user(created)
 
     async def get_user(self, user_id: str) -> UserProfile | None:
-        records = await self._run("MATCH (u:User {user_id: $user_id}) RETURN u", user_id=user_id)
+        # Sessions/memories MERGE a bare User node; only a profile write sets updated_at → treat bare nodes as absent
+        records = await self._run(
+            "MATCH (u:User {user_id: $user_id}) WHERE u.updated_at IS NOT NULL RETURN u", user_id=user_id
+        )
         return node_to_profile(records[0]["u"]) if records else None
 
     async def update_user(self, user_id: str, patch: dict[str, Any], *, now: datetime) -> UserProfile:
@@ -262,7 +287,8 @@ class Neo4jBrainRepository:
           AND ($memory_id IS NULL OR m.id = $memory_id)
         OPTIONAL MATCH (m)-[:SUPERSEDES]->(old:Memory)
         OPTIONAL MATCH (newer:Memory)-[:SUPERSEDES]->(m)
-        RETURN m, old.id AS supersedes, newer.id AS superseded_by
+        WITH m, head(collect(DISTINCT old.id)) AS supersedes, head(collect(DISTINCT newer.id)) AS superseded_by
+        RETURN m, supersedes, superseded_by
         ORDER BY m.created_at
     """
 

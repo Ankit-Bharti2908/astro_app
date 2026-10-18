@@ -212,6 +212,37 @@ def test_memory_cmd_remember_and_forget(client):
     assert d["memory_cmd_result"]["deleted"] == [] and "nothing to forget" in d["response"]
 
 
+def test_untargeted_forget_never_wipes_the_brain(client):
+    """"Forget that" names nothing; deleting everything on an empty target would be the
+    worst possible reading of it. Only an explicit "forget everything" clears the brain."""
+    chat(client, "Planning to switch jobs next year.")
+    chat(client, "Remember that I love classical music")
+    before = {m["key"] for m in memories(client)}
+    assert before == {"career_change", "classical_music"}
+
+    d = chat(client, "Forget that")
+    assert d["memory_cmd_result"] == {"command": "forget", "deleted": [], "keys": [], "reason": "no_target"}
+    assert "Which memory" in d["response"] and {m["key"] for m in memories(client)} == before
+
+    d = chat(client, "Forget everything")
+    assert len(d["memory_cmd_result"]["deleted"]) == 2 and memories(client) == []
+
+
+def test_ephemeral_turn_mutates_nothing(client, repo):
+    """A temporary chat may read the brain but must not write to it — including the forget
+    command and the last_used_at reinforcement that a normal read performs."""
+    chat(client, "Planning to switch jobs next year.")
+    mem = memories(client)[0]
+    assert mem["last_used_at"] is None
+
+    d = chat(client, "Forget about switching jobs", ephemeral=True, session="tmp")
+    assert d["memory_cmd_result"]["deleted"] == [] and d["memory_cmd_result"]["reason"] == "ephemeral"
+    assert [m["key"] for m in memories(client)] == ["career_change"]
+
+    chat(client, "What should I focus on for my career?", ephemeral=True, session="tmp")
+    assert list(repo.memories["rahul"].values())[0].last_used_at is None  # no reinforcement
+
+
 def test_ephemeral_reads_but_never_writes(client, app, repo):
     chat(client, "Planning to switch jobs next year.")
     d = chat(client, "I have a PM interview next month. What should I focus on?", ephemeral=True, session="tmp")

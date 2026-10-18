@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.api.schemas import (
+    ID_PATTERN,
     ChatRequest,
     ChatResponse,
     HealthOut,
@@ -28,6 +38,7 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 MEMORY_ROUTES = {"answer", "memory_recall"}  # §5: skipped for followup, smalltalk, memory_cmd, ephemeral
+UserId = Annotated[str, Path(min_length=1, max_length=128, pattern=ID_PATTERN)]
 
 
 def _container(request: Request):
@@ -53,7 +64,7 @@ async def create_user(body: UserCreate, request: Request):
 
 
 @router.get("/users/{user_id}", response_model=UserOut)
-async def get_user(user_id: str, request: Request):
+async def get_user(user_id: UserId, request: Request):
     c = _container(request)
     try:
         profile = await c.repo.get_user(user_id)
@@ -65,7 +76,7 @@ async def get_user(user_id: str, request: Request):
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
-async def patch_user(user_id: str, body: UserPatch, request: Request):
+async def patch_user(user_id: UserId, body: UserPatch, request: Request):
     c = _container(request)
     patch = body.model_dump(exclude_unset=True)
     try:
@@ -81,7 +92,7 @@ async def patch_user(user_id: str, body: UserPatch, request: Request):
 
 @router.get("/users/{user_id}/memories", response_model=list[MemoryOut])
 async def list_memories(
-    user_id: str,
+    user_id: UserId,
     request: Request,
     life_area: str | None = Query(default=None),
     status_filter: str = Query(default="active", alias="status", pattern="^(active|superseded|expired|deleted|all)$"),
@@ -100,7 +111,7 @@ async def list_memories(
 
 
 @router.delete("/users/{user_id}/memories/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_memory(user_id: str, memory_id: str, request: Request):
+async def delete_memory(user_id: UserId, memory_id: str, request: Request):
     c = _container(request)
     try:
         ok = await c.repo.mark_deleted(user_id, memory_id, now=c.deps.clock())
@@ -179,7 +190,7 @@ def _previous_assistant_reply(state: dict[str, Any]) -> str:
 
 @router.get("/users/{user_id}/memory-runs", response_model=list[MemoryRunOut])
 async def memory_runs(
-    user_id: str,
+    user_id: UserId,
     request: Request,
     session_id: str | None = Query(default=None),
     since: int = Query(default=0, ge=0, description="only runs with seq > since"),

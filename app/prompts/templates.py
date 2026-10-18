@@ -412,6 +412,7 @@ RECALL_BRAIN_DOWN = "My long-term memory is unavailable right now, so I can't lo
 MEMORY_SAVED = "Noted — I'll remember: {items}."
 MEMORY_NOTHING_TO_SAVE = "I couldn't find a durable fact to remember in that. Could you rephrase what you'd like me to keep in mind?"
 MEMORY_FORGOTTEN = "Done — I've forgotten: {items}."
+MEMORY_FORGET_WHAT = "Which memory should I forget? Name the topic — e.g. \u201cforget my job plans\u201d — or say \u201cforget everything\u201d."
 MEMORY_NOTHING_TO_FORGET = "I don't have a stored memory matching that, so there's nothing to forget."
 MEMORY_EPHEMERAL = "This is a temporary chat, so I won't store anything — but I've taken it into account for now."
 MEMORY_BRAIN_DOWN = "My long-term memory is unavailable right now, so I couldn't save that. Please try again later."

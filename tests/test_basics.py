@@ -2,6 +2,7 @@
 routing/language rules, memory scoring, context budgets, the structured-output retry and the HTTP API.
 """
 
+import uuid
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -9,6 +10,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 
 from app.brain.models import Memory, MemoryCandidate, UserProfile
+from app.brain.profile_validation import validate_profile_patch
+from app.brain.repository import apply_profile_patch
 from app.brain.scoring import initial_confidence, initial_importance, is_expired, rank_memories
 from app.context.builder import build_context
 from app.graphs.rules import detect_language, guess_life_areas, rule_route
@@ -142,3 +145,37 @@ def test_console_page_and_memory_run_trace(client):
     assert [c["key"] for c in runs[0]["accepted"]] == ["career_change"]
     assert client.get("/users/rahul/memory-runs", params={"since": runs[0]["seq"]}).json() == []
     assert client.get("/users/other/memory-runs").json() == []  # isolation by user_id
+
+
+def test_ids_cannot_forge_the_composite_thread_key(client):
+    """thread_id is f"{user_id}:{session_id}", so a ':' in either half could address another
+    user's session. Both halves are charset-guarded; an omitted session starts a fresh UUID."""
+    def post(**kw):
+        return client.post("/chat", json={"message": "hi", **kw}).status_code
+
+    assert post(user_id="u", session_id="victim:s1") == 422
+    assert post(user_id="org:u", session_id="s1") == 422
+    assert client.get("/users/bad:id").status_code == 422
+    assert client.get("/users/bad:id/memories").status_code == 422
+    assert post(user_id="a.b@c-d_e", session_id="s1") == 200
+
+    body = client.post("/chat", json={"user_id": "rahul", "message": "hi"}).json()
+    assert uuid.UUID(body["session_id"]).version == 4  # omitted → server mints one
+
+
+def test_inadmissible_profile_values_are_refused_not_repaired(repo, clock):
+    """A chart is computed from these, so an unusable value must not be stored as a plausible
+    one. Validation sits at the shared write path, under both the API and the memory graph."""
+    clean, rejected = validate_profile_patch(
+        {"dob": "2000-01-01", "tob": "222:8 PM", "birth_place": "mars", "name": "Rahul"},
+        today=FIXED_NOW.date(),
+    )
+    assert clean == {"dob": date(2000, 1, 1), "name": "Rahul"}
+    assert set(rejected) == {"tob", "birth_place"}  # never 22:08, never "mars"
+    assert validate_profile_patch({"tob": "2:30 pm", "birth_place": " new  delhi "})[0] == {
+        "tob": "14:30", "birth_place": "new delhi",
+    }
+    assert "future" in validate_profile_patch({"dob": "2030-05-01"}, today=FIXED_NOW.date())[1]["dob"]
+
+    profile = apply_profile_patch(UserProfile(user_id="u"), {"tob": "222:8 PM", "dob": "2000-01-01"}, FIXED_NOW)
+    assert profile.tob is None and profile.zodiac == "Capricorn"  # the good half still lands

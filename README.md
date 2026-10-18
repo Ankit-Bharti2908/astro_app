@@ -48,6 +48,7 @@ Everything is an environment variable (or `.env`); see [`app/config.py`](app/con
 |---|---|---|
 | `BRAIN_BACKEND` | `memory` | `neo4j` or `memory` (in-process, for tests/dev) |
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` / `NEO4J_DATABASE` | `bolt://localhost:7687` / `neo4j` / `neo4j` / `neo4j` | Neo4j connection; empty `NEO4J_USER` disables auth |
+| `NEO4J_CONNECT_TIMEOUT_S` / `NEO4J_MAX_RETRY_TIME_S` | `3` / `5` | Fail fast so an outage degrades instead of stalling |
 | `STRONG_MODEL` | `anthropic/claude-opus-5-5` | LiteLLM model for `answer`, `memory_recall`, `followup` |
 | `SMALL_MODEL` | `anthropic/claude-haiku-5-5` | LiteLLM model for `analyze`, `extract`, `reconcile`, summarisation, smalltalk |
 | `FALLBACK_MODEL` | *(empty)* | Optional fallback provider/model, e.g. `openai/gpt-4o-mini`; the Router falls back to it when the primary fails |
@@ -219,6 +220,13 @@ LLM nodes carry `RetryPolicy(max_attempts=2)` and a node-level `error_handler` t
 
 - **Checkpointer thread id is `user_id:session_id`** (the doc says `session_id`): a session id alone could let one
   user resume another's session. Likewise Neo4j `Session` nodes are keyed per user (`key = user_id:session_id`).
+  Because `:` joins the halves, both are restricted to `[A-Za-z0-9_.@-]` — otherwise a `session_id` of
+  `victim:s1` addresses another user's thread. Omit `session_id` and the server mints a UUID4 and returns it.
+- **Inadmissible profile values are refused, not repaired.** A chart is computed from `dob` / `tob` /
+  `birth_place`, so a wrong value is worse than a missing one. The extraction prompt asks the model to emit
+  nothing it had to repair, and `apply_profile_patch` — the one write path shared by the API and the memory
+  graph — validates again, since a prompt is a request and not a guarantee. A refusal shows in the
+  memory-graph trace as `SKIP` with the reason, rather than disappearing.
 - **Extraction gets the previous assistant turn as *reference-only* context** so corrections such as "actually this
   year, not next" resolve against what was being discussed. The prompt forbids extracting facts from it; assistant
   text is still never a source of user facts.

@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 Language = Literal["en", "hi", "hinglish"]
+# ':' separates the two halves of the checkpointer thread key `user_id:session_id`, so an id
+# containing one could address another user's thread. Barred from both halves (§11).
+ID_PATTERN = r"^[A-Za-z0-9_.@-]+$"
 
 
 class UserCreate(BaseModel):
-    user_id: str = Field(min_length=1, max_length=128)
+    user_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
     name: str | None = Field(default=None, max_length=120)
     dob: date | None = None
     tob: str | None = Field(default=None, max_length=16, description="time of birth, e.g. 14:30")
@@ -65,8 +69,14 @@ class MemoryOut(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    user_id: str = Field(min_length=1, max_length=128)
-    session_id: str = Field(min_length=1, max_length=128)
+    user_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    session_id: str = Field(
+        default_factory=lambda: str(uuid4()),
+        min_length=1,
+        max_length=128,
+        pattern=ID_PATTERN,
+        description="omit to start a new session: the server mints a UUID4 and returns it",
+    )
     message: str = Field(min_length=1, max_length=4000)
     ephemeral: bool = False
     timezone: str | None = Field(default=None, max_length=64)

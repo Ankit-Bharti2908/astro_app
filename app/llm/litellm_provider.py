@@ -170,9 +170,12 @@ class LiteLLMProvider(BaseLLMProvider):
             "openai": bool(os.getenv("OPENAI_API_KEY")),
             "gemini": bool(os.getenv("GEMINI_API_KEY")),
         }
+        configured = any(keys.values()) or any(
+            d["litellm_params"].get("api_key") or d["litellm_params"].get("api_base") for d in self.model_list
+        )
         return {
             "backend": "litellm",
-            "ok": True,
+            "ok": bool(configured),
             "models": {d["model_name"]: d["litellm_params"]["model"] for d in self.model_list},
             "provider_keys_present": keys,
         }
