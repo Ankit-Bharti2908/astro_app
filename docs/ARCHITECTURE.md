@@ -1,19 +1,26 @@
 # MyNaksh Shared Brain — Architecture
 
-Personalized astrology chat service with short-term context, a persistent graph-based Shared Brain, and LLM-driven responses.
+Personalised astrology chat: short-term session context, a persistent graph **Shared Brain**, and LLM replies.
 
 **Stack:** Python · FastAPI · LangGraph · Neo4j · LiteLLM · Pydantic
 
+Companion docs: [DECISIONS](DECISIONS.md) (why, and what it cost) · [API](API.md) (sample requests) ·
+[TESTING](TESTING.md) (scenarios + evaluation).
+
 ---
 
-## 1. Design principles
+## 1. Principles
 
-1. **Agentic where judgment is needed, deterministic where reliability is needed.** Routing shortcuts, safety filters, scoring and writes are rule-based. Context gathering and memory reconciliation get bounded LLM judgment.
-2. **Separate read path from write path.** The response graph only *reads* the Shared Brain. Only the memory graph *writes* to it, after the user has their reply.
-3. **Short-term and long-term memory have different owners.** The LangGraph checkpointer owns the session (messages, summary). Neo4j owns durable user facts.
-4. **Curated facts, not raw logs.** Long-term memory stores what the user stated, filtered and scored, never every message and never the assistant's own claims.
-5. **Bounded context.** Every prompt layer has a token budget, so prompt size stays flat as the graph and conversation grow.
-6. **Degrade, don't crash.** Every external dependency (LLM, Neo4j) has a fallback, and degraded mode is reported in the response.
+1. **Agentic where judgment is needed, deterministic where reliability is needed.** The LLM classifies and phrases;
+   rules score, filter and write.
+2. **One verdict per turn.** The memory write happens *inside* the turn, before the reply is composed, so the reply
+   and the store can never disagree about the sentence the user just sent.
+3. **Two memories, two owners.** The LangGraph checkpointer owns the session (messages, summary). Neo4j owns durable
+   user facts.
+4. **Curated facts, not raw logs.** Only what the user stated about themselves, filtered and scored. Never the
+   assistant's own claims.
+5. **Bounded context.** Every prompt layer has a token budget, so prompt size stays flat as the graph grows.
+6. **Degrade, don't crash.** Every external dependency has a fallback, and degradation is reported in the response.
 
 ---
 
@@ -22,96 +29,80 @@ Personalized astrology chat service with short-term context, a persistent graph-
 ```mermaid
 flowchart LR
     U[User] -->|POST /chat| API[FastAPI]
-    API --> RG[Response Graph]
-    RG -->|response| API
-    API -->|reply| U
-    API -.->|BackgroundTasks, after reply| MG[Memory Graph]
+    API --> RG[Response graph]
+    RG -->|reply| API --> U
 
-    RG <-->|messages + session summary| CP[("Checkpointer<br/>thread_id = session_id")]
-    RG -->|read only| NEO[("Neo4j<br/>Shared Brain")]
-    MG -->|read + write| NEO
-    RG --> RT[LiteLLM Router]
-    MG --> RT
-    RT --> M1[Strong model]
-    RT --> M2[Small model]
-    RT --> M3[Fallback provider]
+    RG -->|learn node, in-turn| MG[Memory graph]
+    MG -->|read + write| NEO[("Neo4j — Shared Brain")]
+    RG -->|read| NEO
+    RG <-->|messages + summary| CP[("Checkpointer<br/>thread = user_id:session_id")]
+    RG & MG --> RT[LiteLLM Router] --> M[Strong / small / fallback models]
 ```
 
 | Component | Responsibility |
 |---|---|
-| **FastAPI** | Validation, endpoints, schedules the memory graph as a background task |
-| **Response graph** | Classifies the message, builds bounded context, generates the reply, compacts the session |
-| **Memory graph** | Extracts, scores, filters, reconciles and writes long-term memories |
-| **Checkpointer** | Short-term state per session. `MemorySaver` in tests, Redis/Postgres saver in production |
+| **FastAPI** | Validation, endpoints, dependency container |
+| **Response graph** | Classify → learn → build bounded context → reply → compact |
+| **Memory graph** | Extract → score → filter → reconcile → write |
+| **Checkpointer** | Short-term state per session (`InMemorySaver` in tests, Postgres in production) |
 | **Neo4j** | Shared Brain: profile, memories, sessions, life areas |
-| **LiteLLM Router** | Task-based model routing, retries, provider fallback |
+| **LiteLLM Router** | Per-task model choice, retries, provider fallback |
 
 ---
 
-## 3. Context layers
+## 3. Context selection
 
-Each turn's prompt is assembled from layers, each with a fixed budget.
+Each turn's prompt is assembled from layers, each with a fixed token budget. Nothing else is sent — never the whole
+graph, never the whole transcript.
 
-| Layer | Content | When included | Budget (tokens) |
+| Layer | Content | When | Budget |
 |---|---|---|---|
-| **L0 Session meta** | Current date, timezone, reply language | Always (never stored) | 30 |
-| **L1 Profile card** | Name, DOB, birth place, sun sign, preferred language | Always | 150 |
-| **L2 Memory index** | One line per life area: `career: 2 goals · finance: 1 goal` | Always | 100 |
-| **L3 Detailed memories** | Top-k active memories for the relevant life areas | `answer` / `memory_recall` routes | 600 |
-| **ST Session summary** | Compacted summary of older turns | Always (if present) | 300 |
-| **ST Recent turns** | Last K messages verbatim | Always | 1200 |
+| **L0 meta** | Date, timezone, reply language | always | 30 |
+| **L1 profile** | Name, DOB, TOB, birth place, sun sign, language — plus *which* of them are missing | always | 150 |
+| **L1b refused** | Values this message offered that the store rejected (§11) | when non-empty | 150 |
+| **L2 index** | One line per life area: `career: 2 goals · finance: 1 goal` | always | 100 |
+| **L3 memories** | Top-k memories for the classified life areas | `answer` / `memory_recall` | 600 |
+| **ST summary** | Compacted summary of older turns | if present | 300 |
+| **ST turns** | Last K messages verbatim | always | 1200 |
 
-- **L2** tells the model what exists even when it isn't loaded, so it never wrongly claims to know nothing.
-- **Stable layers come first** (system prompt, L1) so provider prefix caching applies.
-- Memories are serialized compactly, one line each: `- [career] Goal: switch jobs (target 2027, conf 0.9)`.
-- Token counts per layer are returned in the API response (`context_tokens`).
+- **L2 is the cheap hedge:** the model knows what exists even when it isn't loaded, so it never claims to know nothing.
+- **L1 names the gaps** rather than leaving the model to diff six `unknown` rows — re-asking for a detail already on
+  file is what makes a brain feel like it forgot.
+- Stable layers come first so provider prefix caching applies; volatile L0 goes last.
+- Per-layer token counts are returned on every reply as `context_tokens`.
 
 ---
 
-## 4. Response graph (user-facing, synchronous)
+## 4. Response graph (synchronous)
 
 ```mermaid
 flowchart TD
-    START([START]) --> LS["load_session<br/>L0 meta · L1 profile · L2 index"]
-    LS --> AN["analyze<br/>rules first, small-model fallback<br/>route · life_areas · language"]
+    START([START]) --> LS["load_session — L0 · L1 · L2"]
+    LS --> AN["analyze — route · life areas · language"]
+    AN --> LN["learn — runs the memory graph (§5)"]
 
-    AN -->|answer| AA["answer_agent<br/>prefetch L3 for life_areas<br/>then strong model"]
-    AN -->|followup| FU["followup<br/>short-term context only"]
-    AN -->|memory_recall| MR["memory_recall<br/>Cypher fetch, LLM phrases facts"]
-    AN -->|memory_cmd| MC["memory_cmd<br/>remember / forget, synchronous"]
-    AN -->|smalltalk| ST["smalltalk<br/>no retrieval"]
+    LN -->|answer| AA["answer_agent — prefetch L3, then strong model"]
+    LN -->|followup| FU["followup — short-term context only"]
+    LN -->|memory_recall| MR["memory_recall — facts from Cypher, LLM only phrases"]
+    LN -->|memory_cmd| MC["memory_cmd — remember / forget"]
+    LN -->|smalltalk| ST["smalltalk — profile only"]
 
-    AA -->|"tool call requested<br/>and rounds < 2"| TL["fetch_context (ToolNode)<br/>recall_memories<br/>get_astro_profile<br/>search_past_sessions"]
-    TL -->|ToolMessages| AA
-    AA -->|final answer| CMP
-
-    FU --> CMP["maybe_compact<br/>summarize old turns<br/>if over budget"]
-    MR --> CMP
-    MC --> CMP
-    ST --> CMP
-    CMP --> END([END])
+    AA -->|"tool call, rounds < 2"| TL["fetch_context (ToolNode)"] --> AA
+    AA & FU & MR & MC & ST --> CMP["maybe_compact (§8)"] --> END([END])
 ```
 
-### Nodes
+**`load_session`** — loads L0/L1/L2 and resets per-turn state. Neo4j down → `degraded: ["brain_unavailable"]`,
+continue on short-term context.
 
-**`load_session`**
-- Loads L0, L1 and L2. The checkpointer has already restored this session's messages and summary.
-- If Neo4j fails: sets `degraded += ["brain_unavailable"]` and continues with short-term context only.
+**`analyze`** — rules first (follow-ups, remember/forget, "what do you remember", greetings), small model with
+structured output otherwise. Also labels the reply language, because standard detectors fail on romanised Hindi.
+A classifier route is then *checked against the message*: `memory_cmd` writes and acknowledges — it cannot answer —
+so a message routed there without an actual remember/forget verb is sent to `answer` instead.
 
-**`analyze`**
-- **Rules first:** short anaphoric messages ("why?", "explain that") → `followup`; "remember / forget" → `memory_cmd`; "what do you remember…" → `memory_recall`.
-- **Small-model fallback** with structured output for everything else.
-- Also outputs the **reply language** (`en` / `hi` / `hinglish`). An LLM is used for this because standard language detectors fail on romanized Hindi.
+**`learn`** — the memory graph, in-turn, before any reply node. See §5.
 
-**`answer_agent`** — hybrid retrieval:
-1. **Deterministic prefetch** of top-k memories for the classified life areas, ranked by retrieval score (§7.3).
-2. Strong model generates the answer.
-3. If the model requests more context, control passes to `fetch_context`. Capped at 2 rounds.
-4. The agent has **read-only tools**. It cannot write long-term memory.
-
-**`fetch_context`** (LangGraph `ToolNode`)
-- The LLM can only *request* a tool call. This node executes it (runs the Cypher query) and appends the result as a `ToolMessage`.
-- Kept as a separate node so reasoning and execution are traced, retried and tested separately, and so the round limit is enforced on the edge between them.
+**`answer_agent`** — deterministic prefetch of top-k memories for the classified life areas, then the strong model,
+then at most 2 rounds of **read-only** tool calls. The agent cannot write long-term memory.
 
 | Tool | Returns |
 |---|---|
@@ -119,55 +110,46 @@ flowchart TD
 | `get_astro_profile()` | Sun sign and stubbed chart attributes |
 | `search_past_sessions(query)` | Summaries of earlier sessions |
 
-**`followup`** — answers from recent turns and the session summary only. No Neo4j calls, no memory write.
+**`fetch_context`** — a LangGraph `ToolNode`. The model can only *request* a call; this node executes it, so
+reasoning and execution are traced separately and the round cap lives on the edge between them.
 
-**`memory_recall`** — fetches memories for the requested area directly from Neo4j; the LLM only phrases them. Facts come from the graph, so they can't be hallucinated.
+**`followup`** — recent turns and summary only. No retrieval.
+**`memory_recall`** — facts come from Cypher; the LLM only phrases them, so they cannot be hallucinated.
+**`memory_cmd`** — explicit remember/forget, applied in the same turn, then confirmed.
+**`smalltalk`** — profile card only.
 
-**`memory_cmd`** — explicit "remember X" / "forget X" is executed in the same turn (forget = mark `status: deleted` and remove from retrieval), then confirmed in the reply.
-
-**`smalltalk`** — no retrieval; profile card only.
-
-**`maybe_compact`** — see §8.
-
-Every successful use of a memory updates its `last_used_at` (reinforcement, §7.4).
+Memories actually used in a reply get `last_used_at` refreshed (§7.4) — except ones this same turn created.
 
 ---
 
-## 5. Memory graph (background, asynchronous)
-
-Runs after the response is returned. Skipped entirely for `followup`, `smalltalk` and `ephemeral` requests.
+## 5. Memory graph (in-turn, before the reply)
 
 ```mermaid
 flowchart TD
-    START([START]) --> EX["extract<br/>small model → MemoryCandidate list<br/>linguistic features only, no scores<br/>relative dates resolved"]
-    EX --> SC["score<br/>rules: confidence + importance"]
-    SC --> FI["filter<br/>rules: threshold, never-store list,<br/>assistant text, subject = other"]
-    FI -->|no candidates| END([END])
-    FI -->|Send, one per candidate| RC1[reconcile]
-    FI -->|Send| RC2[reconcile]
-    FI -->|Send| RCN[reconcile]
-    RC1 --> WR["write<br/>MERGE · SUPERSEDES ·<br/>EXTRACTED_FROM"]
-    RC2 --> WR
-    RCN --> WR
-    WR --> END
+    START([START]) --> EX["extract — small model → MemoryCandidate[]<br/>features only, canonical English, dates resolved"]
+    EX --> SC["score — rules: confidence + importance"]
+    SC --> FI["filter — rules: threshold, never-store, assistant text, subject=other"]
+    FI -->|none| END([END])
+    FI -->|Send, one per candidate| RC[reconcile] --> WR["write — MERGE · SUPERSEDES · EXTRACTED_FROM"] --> END
 ```
 
-**`extract`**
-- Input: the user's message only. Assistant text is never a source of user facts.
-- Output: list of `MemoryCandidate` (§7.1). The LLM labels observable features; it does not produce numeric scores.
-- Relative dates are resolved against L0's current date: "next year" → `target_year: 2027`, "next month" → `valid_until: 2026-11-30`.
-- Values are normalized to **canonical English** so memories stated in Hindi are retrievable by English questions and vice versa.
+Runs for `answer` / `followup` / `memory_recall`. Skipped for `smalltalk`, `memory_cmd` (writes inline) and
+`ephemeral: true`.
 
-**`score`** — deterministic confidence and importance (§7.2).
+**Why before the reply, not after.** It used to run as a `BackgroundTask` once the reply had been sent. Two defects
+followed from that, and they are the same defect: the store refused `"65 may 2200"` and the reply — which never saw
+the refusal — restated it as fact; and a user who typed again within ~2 s got a turn whose profile had not caught up.
+Learning first gives one verdict. The write is durable before the response leaves, the reply speaks from the
+refreshed profile, and anything refused is named in the prompt (L1b) so the reply can say *which part* it could not
+use. Cost: ~1.4 s per turn.
 
-**`filter`** — deterministic. Drops a candidate if:
-- confidence < 0.6
-- it falls in a never-store category (health details, finances, third-party sensitive info)
-- `ephemeral` is set
+**`extract`** — the user's message only; the previous assistant turn is passed as reference-only, so "actually this
+year, not next" resolves, but assistant text is never a source of facts. Relative dates resolve against L0.
+Values are normalised to canonical English, so a fact stated in Hindi answers an English question.
 
-**`reconcile`** — one parallel run per candidate via LangGraph's `Send` API (§7.5).
+**`score` / `filter`** — deterministic (§7.2). Drops confidence < 0.6, never-store categories, hypotheticals.
 
-**`write`** — idempotent `MERGE` on a canonical key, `SUPERSEDES` links for replaced memories, `EXTRACTED_FROM` link to the session for provenance.
+**`reconcile`** — one parallel run per candidate via `Send` (§7.5). **`write`** — idempotent `MERGE` on a canonical key.
 
 ---
 
@@ -179,55 +161,47 @@ flowchart LR
     U -->|PREFERS_LANGUAGE| L((Language))
     U -->|HAS_GOAL / INTERESTED_IN /<br/>PREFERS / EXPERIENCED| M((Memory))
     M -->|ABOUT| LA((LifeArea))
-    M -->|SUPERSEDES| M2((Memory<br/>superseded))
+    M -->|SUPERSEDES| M2((Memory — superseded))
     M -->|EXTRACTED_FROM| S((Session))
     U -->|HAD_SESSION| S
 ```
 
-### Nodes
-
 ```
 (:User {user_id, name, dob, tob, birth_place, created_at, updated_at})
-(:ZodiacSign {name})                      // stub: derived from DOB
-(:Language {code})                        // en, hi
-(:LifeArea {name})                        // career, relationships, health, finance, family, education, spirituality
-(:Session {session_id, started_at, ended_at, summary, turn_count})
+(:ZodiacSign {name})                    // derived from dob
+(:Language {code})                      // en | hi | hinglish
+(:LifeArea {name})                      // career, relationships, health, finance, family,
+                                        // education, spirituality, general
+(:Session {key, user_id, session_id, summary, turn_count, started_at, ended_at})
 (:Memory {
-    id, type, key, value, attributes,     // attributes: JSON, e.g. {"target_year": 2027}
-    life_area, cardinality,               // single | multi
-    certainty, source,                    // explicit|hedged|hypothetical ; stated|confirmed
-    confidence, importance,
+    id, type, key, value, attributes,   // attributes JSON, e.g. {"target_year": 2027}
+    life_area, cardinality,             // single | multi
+    certainty, source, confidence, importance,
     mention_count, last_used_at, last_confirmed_at,
-    valid_until,                          // null = no hard expiry
-    status,                               // active | superseded | expired | deleted
-    created_at, updated_at
+    valid_until, status,                // active | superseded | expired | deleted
+    prompt_version, created_at, updated_at
 })
 ```
-
-### Relationships
 
 | Relationship | Meaning |
 |---|---|
 | `HAS_ZODIAC`, `PREFERS_LANGUAGE` | Profile-derived attributes |
 | `HAS_GOAL`, `INTERESTED_IN`, `PREFERS`, `EXPERIENCED` | User → Memory, typed by memory type |
-| `ABOUT` | Memory → LifeArea; the main retrieval axis |
-| `SUPERSEDES` | New memory → memory it replaced (history, never deleted) |
-| `EXTRACTED_FROM` | Memory → Session it came from (provenance) |
+| `ABOUT` | Memory → LifeArea — the main retrieval axis |
+| `SUPERSEDES` | Replacement → replaced memory (history, never deleted) |
+| `EXTRACTED_FROM` | Memory → Session (provenance) |
 | `HAD_SESSION` | User → Session |
 
-### Constraints and indexes
-
 ```cypher
-CREATE CONSTRAINT user_id IF NOT EXISTS FOR (u:User) REQUIRE u.user_id IS UNIQUE;
-CREATE CONSTRAINT memory_id IF NOT EXISTS FOR (m:Memory) REQUIRE m.id IS UNIQUE;
-CREATE CONSTRAINT session_id IF NOT EXISTS FOR (s:Session) REQUIRE s.session_id IS UNIQUE;
-CREATE INDEX memory_lookup IF NOT EXISTS FOR (m:Memory) ON (m.life_area, m.status);
+CREATE CONSTRAINT user_id      FOR (u:User)    REQUIRE u.user_id IS UNIQUE;
+CREATE CONSTRAINT memory_id    FOR (m:Memory)  REQUIRE m.id IS UNIQUE;
+CREATE CONSTRAINT session_key  FOR (s:Session) REQUIRE s.key IS UNIQUE;   -- key = user_id:session_id
+CREATE INDEX memory_lookup     FOR (m:Memory)  ON (m.life_area, m.status);
+CREATE INDEX session_lookup    FOR (s:Session) ON (s.user_id, s.session_id);
 ```
 
-### Why a graph
-- Memories are naturally relational: user → goal → life area → session.
-- Supersession history and provenance are edges, not extra tables.
-- Retrieval is a traversal by life area, not a scan of everything the user said.
+**Why a graph:** memories are relational (user → goal → life area → session); supersession history and provenance
+are edges rather than extra tables; retrieval is a traversal by life area, not a scan.
 
 ---
 
@@ -235,151 +209,118 @@ CREATE INDEX memory_lookup IF NOT EXISTS FOR (m:Memory) ON (m.life_area, m.statu
 
 ### 7.1 What the LLM extracts
 
+| Field | Values |
+|---|---|
+| `type` | `goal` · `preference` · `interest` · `life_event` · `profile_fact` |
+| `key` / `value` | canonical slot and canonical **English** value, e.g. `career_change` / `switch jobs` |
+| `attributes` | e.g. `{"target_year": 2027}` |
+| `life_area` | career, relationships, health, finance, family, education, spirituality, general |
+| `certainty` | `explicit` · `hedged` · `hypothetical` |
+| `subject` | `self` · `other` |
+| `temporality` | `current` · `future` · `past` |
+| `user_asked_to_remember` | bool |
+| `valid_until` | date, for time-bound facts |
+
+**Remember:** goals, stable preferences, interests, profile facts, significant life events.
+**Don't:** small talk, questions, passing moods, hypotheticals, facts about other people, anything the assistant
+said, never-store categories (health diagnoses, financial detail, third-party sensitive info).
+
+The five profile slots (`name`, `dob`, `tob`, `birth_place`, `preferred_language`) are written to the `User` node, not
+as `Memory` nodes — decided by the **key**, never by the type the extractor guessed.
+
+### 7.2 Confidence and importance — rules, not the LLM
+
+Verbalised LLM scores are poorly calibrated and unstable between runs, so the model labels features and rules produce
+the numbers.
+
 ```python
-class MemoryCandidate(BaseModel):
-    type: Literal["goal", "preference", "interest", "life_event", "profile_fact"]
-    key: str                      # canonical slot, e.g. "career_change", "preferred_language"
-    value: str                    # canonical English
-    attributes: dict = {}         # e.g. {"target_year": 2027}
-    life_area: str
-    certainty: Literal["explicit", "hedged", "hypothetical"]
-    subject: Literal["self", "other"]
-    temporality: Literal["current", "future", "past"]
-    user_asked_to_remember: bool
-    valid_until: date | None      # for time-bound facts
-```
-
-**Remember:** goals, stable preferences, interests, profile facts, significant life events — things likely to matter in a future conversation.
-
-**Don't remember:** small talk, questions, passing moods, hypotheticals, facts about other people, anything the assistant said (including its own predictions), never-store categories.
-
-### 7.2 Confidence and importance (rule-based)
-
-LLM-verbalized confidence scores are poorly calibrated and unstable between runs, so the LLM only classifies features and rules produce the numbers.
-
-```python
-BASE_CONFIDENCE = {"explicit": 0.9, "hedged": 0.6, "hypothetical": 0.3}
-
-def initial_confidence(c):
-    if c.user_asked_to_remember:
-        return 1.0
-    score = BASE_CONFIDENCE[c.certainty]
-    if c.subject == "other":
-        score *= 0.5
-    return score
-
+BASE_CONFIDENCE = {"explicit": 0.9, "hedged": 0.6, "hypothetical": 0.3}   # ×0.5 if subject == "other"
+                                                                          # 1.0 if user_asked_to_remember
 BASE_IMPORTANCE = {"profile_fact": 1.0, "goal": 0.9, "life_event": 0.8,
                    "preference": 0.6, "interest": 0.5}
 ```
 
-Confidence then evolves with **evidence across conversations**:
-
 | Event | Effect |
 |---|---|
-| Same fact mentioned again | `confidence = min(1.0, confidence + 0.1)`, `mention_count += 1` |
+| Mentioned again | `confidence += 0.1` (cap 1.0), `mention_count += 1` |
 | User confirms | `confidence = 1.0`, `last_confirmed_at = now` |
 | User contradicts | Old memory superseded (§7.5) |
-| Memory used in a reply | `last_used_at = now` (feeds decay) |
+| Used in a reply | `last_used_at = now` |
 
-The 0.6 storage threshold is validated against a hand-labelled set (§11).
+The 0.6 storage threshold is validated against a labelled set rather than asserted — see [TESTING](TESTING.md).
 
 ### 7.3 Retrieval score
 
 ```
-retrieval_score = importance × confidence × recency_factor
-recency_factor  = exp(-λ_type × days_since(last_used_at or updated_at))
+score = importance × confidence × exp(-λ_type × days_since(last_used_at or updated_at))
 ```
 
-Top-k active, non-expired memories for the relevant life areas are returned in descending score.
+Top-k active, non-expired memories for the relevant life areas, descending. A narrowed read always also includes the
+`general` bucket — that is where extraction files anything it could not place, so matching the area exactly would turn
+every misfiling into permanent amnesia.
 
 ### 7.4 Expiry and decay
 
-**Hard expiry** — time-bound facts carry `valid_until`. Past that date they are excluded from retrieval (or shown as a past event: "you had a PM interview in November").
+**Hard:** `valid_until` excludes a memory from retrieval once past.
+**Soft:** decay computed at read time, so no scheduler is needed.
 
-**Soft decay** — computed at read time, so no scheduler is needed:
-
-| Type | λ (per day) | Behaviour |
-|---|---|---|
-| `profile_fact` | 0 | Never decays |
-| `goal`, `life_event` | 0.005 | Slow |
-| `preference` | 0.01 | Moderate |
-| `interest` | 0.02 | Fast unless reinforced |
-
-Using a memory resets `last_used_at`, so memories that keep proving useful stay strong. Production: a nightly job marks memories `expired` once past `valid_until` or below a score floor.
-
-### 7.5 Conflict resolution (`reconcile`)
-
-Rules first, LLM for multi-valued ambiguity and cross-key conflicts.
-
-| Cardinality | Examples | On a new value with the same `key` |
-|---|---|---|
-| **single** | DOB, birth place, preferred language, current job | Deterministic **SUPERSEDE** |
-| **multi** | Goals, interests, preferences | LLM decides ADD / UPDATE / SUPERSEDE / NOOP against existing active memories |
-
-| Decision | Example |
+| Type | λ/day |
 |---|---|
-| **ADD** | No existing career goal |
-| **UPDATE** | Goal exists; add `target_year` |
-| **SUPERSEDE** | "Actually I'm switching this year, not next" |
-| **NOOP** | Duplicate |
+| `profile_fact` | 0 — never decays |
+| `goal`, `life_event` | 0.005 |
+| `preference` | 0.01 |
+| `interest` | 0.02 |
 
-- **Source priority:** explicit correction > direct statement > earlier statement.
+Using a memory resets `last_used_at`, so what keeps proving useful stays strong.
+
+### 7.5 Conflict resolution
+
+| Cardinality | Examples | On a new value for the same key |
+|---|---|---|
+| **single** | DOB, birth place, language, current job | deterministic **SUPERSEDE** |
+| **multi** | goals, interests, preferences | LLM picks ADD / UPDATE / SUPERSEDE / NOOP |
+
 - **Cross-key conflicts:** a correction often arrives under a *different* key — "start my own business **instead of**
-  switching jobs" extracts as `start_own_business`, which collides with nothing. So beyond the same-`key` matches,
-  reconcile also offers the model recent active `goal`/`life_event` memories **in the same life area** (capped at 5).
-  Without this the conflicting goal is never shown to the model and both goals stay active. Preferences and interests
-  are excluded: one rarely cancels another.
-- **Never delete:** superseded memories keep `status: superseded` with a `SUPERSEDES` link from the replacement.
-- Profile corrections (e.g. DOB) also recompute derived attributes such as the zodiac sign.
+  switching jobs" collides with nothing. So reconcile is also shown recent active `goal`/`life_event` memories in the
+  same life area (capped at 5). Without this both goals stay active.
+- **Source priority:** explicit correction > direct statement > earlier statement.
+- **Never delete:** superseded memories keep `status: superseded` and a `SUPERSEDES` link from their replacement.
+- A profile correction recomputes derived attributes (zodiac).
 
 ---
 
-## 8. Conversation summarization (`maybe_compact`)
+## 8. Summarisation (`maybe_compact`)
 
-1. If the session's message tokens exceed the threshold, summarize the older turns **incrementally**: previous summary + turns being dropped → new summary.
-2. Keep the last K turns verbatim; remove the rest from state with `RemoveMessage`.
-3. Persist the summary on the `Session` node; `search_past_sessions` searches these.
+Over the token threshold, older turns are summarised **incrementally** (previous summary + dropped turns → new
+summary), the last K turns stay verbatim, the rest leave state via `RemoveMessage`, and the summary is persisted on
+the `Session` node where `search_past_sessions` can find it.
 
-Summaries are **episodic context**, never user facts. Facts reach the Shared Brain only through the memory graph's filter.
+Summaries are **episodic context, never facts**. Facts reach the brain only through the memory graph's filter.
 
 ---
 
-## 9. Model routing and fallback
+## 9. Model routing
 
-LiteLLM Router, configured per task:
-
-| Task | Model tier |
+| Task | Tier |
 |---|---|
-| `analyze` (fallback path), `extract`, `reconcile`, summarization | Small, cheap model |
-| `answer_agent`, `memory_recall`, `followup` | Strong model |
+| `analyze`, `extract`, `reconcile`, summarisation | small |
+| `answer_agent`, `memory_recall`, `followup` | strong |
 
-**Fallback chain:** primary (with timeout) → fallback provider → canned reply with `degraded: ["llm_unavailable"]`.
-
-**Sampling temperature** is set per task, not per model: `analyze`, `extract`, `reconcile` and summarization run at
-`LLM_TEMPERATURE_STRUCTURED` (0.0) because they return decisions, not prose — at a provider default of 1.0 the same
-message routes differently between runs and the same correction sometimes `ADD`s and sometimes `SUPERSEDE`s. Replies
-run at `LLM_TEMPERATURE_REPLY` (0.4).
-
-**Structured output failures:** retry once with the validation error in the prompt, then skip — no memory write in the memory graph, default `answer` route in the response graph.
-
-All LLM nodes carry a LangGraph `RetryPolicy(max_attempts=2)`; the graph has a `recursion_limit` to bound the agent loop.
+**Fallback:** primary (with timeout) → fallback provider → canned reply with `degraded: ["llm_unavailable"]`.
+**Temperature is per task, not per model:** decisions run at 0.0 (otherwise the same correction sometimes `ADD`s and
+sometimes `SUPERSEDE`s), replies at 0.4. Structured-output failures retry once with the validation error, then skip.
+Every LLM node carries `RetryPolicy(max_attempts=2)`; the graph has a `recursion_limit`.
 
 ---
 
-## 10. Multilingual (Hindi / Hinglish)
+## 10. Multilingual
 
-**Reply language precedence:**
-1. Explicit request in the message ("reply in Hindi"), which is also saved as the `PREFERS_LANGUAGE` preference.
-2. Language of the current message.
-3. Profile's preferred language.
+Reply language precedence: **explicit request** → **language of the message** → **profile preference**. Detection
+happens in `analyze` as an LLM label (`en` / `hi` / `hinglish`).
 
-- Language detection runs inside `analyze` (LLM label: `en` / `hi` / `hinglish`).
-- **Memories are stored in canonical English** regardless of input language; responses are generated in the target language.
-- **Prompt text is English only**, whatever the user writes. The reply language is an instruction (`<language>` in
-  `SYSTEM_BASE`) resolved against the `Reply language` field of the L0 meta layer, not a translated prompt — one
-  prompt to maintain instead of three, and no drift between language variants.
-- **Canned fallbacks are English too** (`CANNED_LLM_UNAVAILABLE`, `RECALL_EMPTY`, the `MEMORY_*` confirmations).
-  They fire precisely when no model is reachable, so nothing is available to translate them at that moment.
+Memories are stored in **canonical English** whatever the input language. Prompts are English-only — the reply
+language is an instruction resolved against L0, not a translated prompt, so there is one prompt to maintain and no
+drift between variants. Canned fallbacks are English too: they fire exactly when no model is reachable to translate.
 
 ---
 
@@ -387,13 +328,21 @@ All LLM nodes carry a LangGraph `RetryPolicy(max_attempts=2)`; the graph has a `
 
 | Failure | Behaviour |
 |---|---|
-| Invalid input | Pydantic validation → 422 with field errors |
-| Unknown user / missing profile | Answer generically; prompt to share birth details when the question needs them |
+| Malformed request | Pydantic → 422 with field errors |
+| **Unusable birth detail** | Refused, not repaired — see below |
+| Unknown user / missing profile | Answer generically; ask only for the details actually missing |
 | LLM failure | Retry → fallback provider → canned reply, `degraded: ["llm_unavailable"]` |
-| Neo4j failure | Respond from short-term context, `degraded: ["brain_unavailable"]`; memory graph skips writes and logs |
-| Extraction / validation failure | Skip memory write, log; never blocks the response |
-| Empty memory / no relevant context | Proceed without L3; `context_used` lists only what was used |
-| Agent loop runaway | Max 2 tool rounds + `recursion_limit` |
+| Neo4j failure | Reply from short-term context, `degraded: ["brain_unavailable"]`; writes skipped |
+| Extraction failure | Skip the write, log; never blocks the reply |
+| No relevant memories | Proceed without L3; `context_used` lists only what was used |
+| Agent loop runaway | 2 tool rounds + `recursion_limit` |
+
+**Unusable birth details.** A chart is computed from `dob` / `tob` / `birth_place`, so a wrong value is worse than a
+missing one: it yields a confident reading of a moment that never happened. Both write paths (the typed `/users` API
+and the memory graph's PROFILE action) go through one choke point, `apply_profile_patch`, which **rejects rather than
+repairs** — the prompt asks the model not to emit a repaired value, but a prompt is a request, not a guarantee.
+A refusal is visible three ways: `SKIP` with a reason in the memory-run trace, the L1b prompt layer, and therefore the
+reply itself, which names the part it could not make sense of instead of echoing it back as fact.
 
 ---
 
@@ -401,144 +350,84 @@ All LLM nodes carry a LangGraph `RetryPolicy(max_attempts=2)`; the graph has a `
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `POST` | `/users` | Create user with profile (zodiac derived from DOB) |
-| `PATCH` | `/users/{user_id}` | Update profile |
-| `POST` | `/chat` | Chat turn |
-| `GET` | `/users/{user_id}/memories` | List active memories (optional `life_area` filter) |
-| `DELETE` | `/users/{user_id}/memories/{memory_id}` | Forget a memory |
-| `GET` | `/health` | Liveness + Neo4j/LLM status |
+| `POST` | `/users` | Create a user (zodiac derived from DOB) |
+| `GET` `PATCH` | `/users/{user_id}` | Read / update profile |
+| `POST` | `/chat` | A chat turn |
+| `GET` | `/users/{user_id}/memories` | Memories ranked by retrieval score |
+| `DELETE` | `/users/{user_id}/memories/{memory_id}` | Forget (soft delete) |
+| `GET` | `/users/{user_id}/memory-runs` | What the memory graph did, per turn |
+| `GET` | `/health` | Liveness + brain/LLM status |
+| `GET` | `/ui/` | Orchestration console |
 
-### `POST /chat`
-
-```json
-{
-  "user_id": "user-123",
-  "session_id": "session-456",
-  "message": "What should I focus on for my career?",
-  "ephemeral": false
-}
-```
-
-```json
-{
-  "response": "Since you're planning a job switch in 2027...",
-  "user_id": "user-123",
-  "session_id": "session-456",
-  "route": "answer",
-  "language": "en",
-  "context_used": ["user_profile", "memory:career_change", "session_summary"],
-  "context_tokens": {"profile": 82, "index": 24, "memories": 46, "summary": 0, "turns": 210},
-  "degraded": []
-}
-```
-
-`ephemeral: true` reads memory but writes nothing (temporary chat).
+Request/response examples: [API.md](API.md). `ephemeral: true` reads the brain and writes nothing.
 
 ---
 
-## 13. Walkthrough (PDF scenario)
+## 13. Walkthrough
 
-| # | Message | Route | Context used | Memory graph result |
+| # | Message | Route | Context used | Memory result |
 |---|---|---|---|---|
-| 1 | "My name is Rahul, born 15 Aug 1995 in Delhi. Planning to switch jobs next year." | `answer` | profile | Profile updated, sign = Leo; **ADD** goal `career_change {target_year: 2027}`, conf 0.9 |
-| 2 | "What should I focus on for my career?" | `answer` | profile, career goal (prefetched) | Nothing new |
-| 3 | "Why do you say that?" | `followup` | recent turns only | Skipped |
-| 4 | *New session:* "What do you remember about my career goals?" | `memory_recall` | career memories from Neo4j | Nothing new |
-| 5 | "Actually I'll switch this year, not next." | `answer` | career goal | **SUPERSEDE** → `target_year: 2026`; old memory linked via `SUPERSEDES` |
-| 6 | "I have a PM interview next month." | `answer` | career goal | **ADD** goal `pm_interview`, `valid_until: 2026-11-30` |
-| 7 | "Meri shaadi kab hogi?" | `answer` | profile, relationship memories (none) | Reply in Hinglish; nothing stored |
+| 1 | "My name is Rahul, born 15 Aug 1995 in Delhi. Planning to switch jobs next year." | `answer` | profile | PROFILE (sign = Leo); **ADD** `career_change {target_year: 2027}` |
+| 2 | "What should I focus on for my career?" | `answer` | profile, career goal | nothing new |
+| 3 | "Why do you say that?" | `followup` | recent turns | nothing |
+| 4 | *new session:* "What do you remember about my career goals?" | `memory_recall` | career memories | nothing |
+| 5 | "Actually I'll switch this year, not next." | `answer` | career goal | **SUPERSEDE** → `target_year: 2026` |
+| 6 | "I have a PM interview next month." | `answer` | career goal | **ADD** with `valid_until` |
+| 7 | "Meri shaadi kab hogi?" | `answer` | profile | reply in Hinglish; nothing stored |
 
-Row 4 shows the memory split: the checkpointer is empty for the new `session_id`, but the goal is still in Neo4j under `user_id`.
+Row 4 is the memory split made visible: the checkpointer is empty for the new `session_id`, the goal is still in Neo4j
+under `user_id`. Replay it with [`demo.http`](../demo.http).
 
 ---
 
 ## 14. Project structure
 
-```
-app/
-├── main.py                  # FastAPI app, lifespan (Neo4j driver, graphs)
-├── api/                     # routes, request/response schemas
-├── graphs/
-│   ├── state.py             # ChatState, MemoryState
-│   ├── response_graph.py    # build + compile
-│   ├── memory_graph.py
-│   └── nodes/               # one module per node
-├── tools/                   # recall_memories, get_astro_profile, search_past_sessions
-├── brain/
-│   ├── repository.py        # BrainRepository protocol
-│   ├── neo4j_repo.py
-│   ├── memory_repo.py       # in-memory implementation for tests
-│   └── scoring.py           # confidence, importance, decay, retrieval score
-├── llm/
-│   ├── provider.py          # LLMProvider protocol, LiteLLM router config
-│   └── litellm_provider.py  # the one real backend
-├── context/builder.py       # layer assembly + token budgets
-├── profile/zodiac.py        # sun sign stub
-├── prompts/                 # versioned prompt templates
-├── static/index.html        # orchestration console served at /ui
-└── config.py
-tests/
-eval/                        # labelled set + extraction/storage metrics script
-docker-compose.yml           # api + neo4j
-demo.http                    # replays the walkthrough
-```
+One module per node under `app/graphs/nodes/`, one protocol per external dependency
+(`BrainRepository`, `LLMProvider`) with an in-memory implementation beside the real one.
+Full tree: [README](../README.md#project-layout).
 
 ---
 
 ## 15. Testing
 
-All tests run with `tests/fake_llm.py` (a scripted `LLMProvider`), the in-memory brain repository and
-`MemorySaver` — no API key or Neo4j required.
-
-| # | Scenario | Assert |
-|---|---|---|
-| 1 | New user | Response returned; `context_used` has no memories |
-| 2 | Create long-term memory | Goal stored with `target_year: 2027`, conf 0.9 |
-| 3 | Retrieve memory | Career question → `memory:career_change` in `context_used` |
-| 4 | Follow-up | Route `followup`; no brain calls; no memory write |
-| 5 | New session | Fresh `session_id` still recalls the goal |
-| 6 | Irrelevant memory | Health memory absent from a career answer's context |
-| 7 | Correction | Old memory `superseded`, new one active, `SUPERSEDES` link exists |
-| 8 | Missing profile | Generic answer, no error |
-| 9 | Hypothetical | "If I ever moved abroad…" → nothing stored |
-| 10 | Brain down | Response with `degraded: ["brain_unavailable"]` |
-| 11 | Hinglish | `language: hinglish`; memory stored in English |
-| 12 | Agent tool loop | Scripted tool call → result in `context_used`; max 2 rounds |
-
----
+45 tests, no network, keys or database required (scripted LLM + in-memory brain + `InMemorySaver`).
+The eight required scenarios and what each proves: [TESTING.md](TESTING.md).
 
 ## 16. Evaluation
 
-| Dimension | Method |
-|---|---|
-| **Memory accuracy** | Labelled set of ~30 messages → precision/recall of storage decisions and accuracy of `certainty` / `subject` labels |
-| **Context relevance** | Rate of irrelevant memories in `context_used` on labelled queries |
-| **Personalization** | A/B: same questions with brain on vs off, LLM-judge rubric (uses user facts correctly, no invented facts) |
-| **Consistency** | Multi-session scripts; contradiction rate against stored memories |
-| **Persistence** | Memories recalled after process restart and across sessions |
-| **Cost / latency** | Tokens per layer and per-node latency from traces |
+Memory accuracy ships as a script (`python -m eval.run_eval`); the rest are paired A/B runs with the brain on vs off.
+Method and caveats: [TESTING.md](TESTING.md#evaluation).
 
 ---
 
 ## 17. Production considerations
 
-- **Privacy:** birth data is PII; consent at signup, encryption at rest, never-store categories, `DELETE` endpoint for right-to-forget.
-- **Isolation:** every query scoped by `user_id`; no cross-user traversal.
-- **Async writes at scale:** move the memory graph from `BackgroundTasks` to a queue (Celery / Arq / SQS) with retries and a dead-letter queue.
-- **Observability:** LangSmith or Langfuse traces per node; metrics for route distribution, tool-call rate, memory writes per turn, degraded responses.
-- **Prompt versioning:** prompts stored as versioned templates; version recorded on each memory write.
-- **Checkpointer:** Redis or Postgres saver with TTL on idle sessions.
-- **Cost control:** rules-first routing, small model for background tasks, prefix caching, bounded agent loop.
+- **Privacy:** birth data is PII — consent at signup, encryption at rest, never-store categories, a delete endpoint
+  for right-to-forget.
+- **Isolation:** every query scoped by `user_id`; ids are pattern-restricted so a crafted `session_id` cannot address
+  another user's checkpointer thread.
+- **Writes at scale:** the memory graph is in-turn today for read-after-write consistency. Moving it to a queue
+  (Celery / Arq / SQS) buys back ~1.4 s but reintroduces the race, so it needs a per-user write lock or a
+  read-your-writes cache — not just a queue.
+- **Observability:** LangSmith / Langfuse traces per node; metrics for route distribution, memory writes per turn,
+  degraded rate.
+- **Checkpointer:** Postgres or Redis saver with a TTL on idle sessions.
+- **Geocoding:** `birth_place` is validated for shape, not existence. A real chart needs lat/long, so production
+  should geocode and reject what cannot be located.
+- **Cost:** rules-first routing, small model for background work, prefix caching, bounded agent loop.
 
 ---
 
 ## 18. Trade-offs
 
-| Decision | Alternative | Why this choice |
+Short version; the reasoning is in [DECISIONS.md](DECISIONS.md).
+
+| Decision | Alternative | Why |
 |---|---|---|
-| LangGraph with two graphs | Single linear service | Real branching, bounded tool loop, parallel reconcile, checkpointed short-term state; read/write isolation |
-| Neo4j for long-term memory | LangGraph Store / vector DB | Supersession history, provenance and life-area traversal are relational |
-| Rule-based confidence | LLM-verbalized scores | Verbalized scores are poorly calibrated and unstable |
-| Life-area retrieval | Embedding search | Deterministic, explainable, testable; embeddings are a future hybrid addition |
-| Read-time decay | Scheduled decay job | No infrastructure needed; job added in production for archival |
-| Agent has read-only tools | Agent writes memory directly | Prevents unfiltered or hallucinated facts entering long-term memory |
+| Two LangGraph graphs | One linear service | Branching, bounded tool loop, parallel reconcile, checkpointed session |
+| Memory write in-turn | Background task | One verdict per turn; costs ~1.4 s |
+| Neo4j | Vector store | Supersession, provenance and life-area traversal are relational |
+| Rule-based scores | LLM-verbalised scores | Calibration and reproducibility |
+| Life-area retrieval | Embedding search | Deterministic, explainable, testable |
+| Read-time decay | Scheduled job | No infrastructure; add a job for archival |
+| Read-only agent tools | Agent writes memory | Keeps unfiltered facts out of long-term memory |

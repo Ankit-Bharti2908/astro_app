@@ -4,13 +4,20 @@ Personalised astrology chat with **short-term session memory** (LangGraph checkp
 Shared Brain** (Neo4j) and **LLM-driven responses** routed through LiteLLM.
 
 Stack: Python 3.11+ · FastAPI · LangGraph · Neo4j · LiteLLM · Pydantic.
-The design is documented in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); this README covers running, configuring
-and testing the implementation of that design.
+
+| Doc | What is in it |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The design: graphs, context layers, brain schema, memory strategy |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Key decisions and trade-offs — what each one cost |
+| [`docs/API.md`](docs/API.md) | Sample requests and responses, captured from a live run |
+| [`docs/TESTING.md`](docs/TESTING.md) | The required scenarios → tests, and the evaluation plan |
+
+This README covers running, configuring and operating it.
 
 ```
-POST /chat ──► response graph (reads brain) ──► reply
-                   │ BackgroundTasks, after the reply
-                   └─► memory graph (extract → score → filter → reconcile‖ → write) ──► Neo4j
+POST /chat ──► response graph ──► learn ──► memory graph ──► Neo4j      (the write, in-turn)
+                                    │        extract → score → filter → reconcile‖ → write
+                                    └──► reply, composed from what was just written
 ```
 
 ## Quick start
@@ -126,9 +133,9 @@ app/
 ├── api/                    # schemas.py, routes.py
 ├── graphs/
 │   ├── state.py            # ChatState, MemoryState
-│   ├── response_graph.py   # load_session → analyze → {answer_agent ⇄ fetch_context | followup | memory_recall | memory_cmd | smalltalk} → maybe_compact
+│   ├── response_graph.py   # load_session → analyze → learn → {answer_agent ⇄ fetch_context | followup | memory_recall | memory_cmd | smalltalk} → maybe_compact
 │   ├── memory_graph.py     # extract → score → filter → Send(reconcile)* → write
-│   ├── rules.py            # rules-first routing, language heuristics, life-area keywords
+│   ├── rules.py            # rules-first routing, route honouring, life-area keywords
 │   └── nodes/              # one module per node (+ memory_ops.py: shared pipeline primitives)
 ├── tools/brain_tools.py    # recall_memories · get_astro_profile · search_past_sessions (read-only ToolNode tools)
 ├── brain/                  # models.py · scoring.py · repository.py (protocol) · neo4j_repo.py · memory_repo.py
@@ -139,7 +146,7 @@ app/
 └── static/index.html       # the orchestration console served at /ui
 tests/                      # see below
 eval/                       # labelled set + storage-accuracy / threshold-sweep script
-docs/ARCHITECTURE.md        # the design this implements
+docs/                       # ARCHITECTURE · DECISIONS · API · TESTING
 docker-compose.yml · Dockerfile · demo.http
 ```
 
@@ -148,72 +155,44 @@ docker-compose.yml · Dockerfile · demo.http
 ```bash
 pytest -q                   # 45 tests, no network, no keys, no database needed: ~3 s
 ruff check app tests eval
+python -m eval.run_eval     # memory-accuracy eval (needs a provider key)
 ```
 
-| Layer | Where | What it proves |
-|---|---|---|
-| §15 scenarios + walkthrough | `test_chat_scenarios.py` | New user, create/retrieve/correct memories, follow-up without brain calls, cross-session recall, irrelevant memories excluded, brain down, LLM down, Hinglish, bounded tool loop, expiry, remember/forget, ephemeral, compaction + past-session search, language precedence |
-| Building blocks | `test_basics.py` | Routing shortcuts and language detection, confidence/importance/decay/expiry maths, context layers inside their budgets, structured-output retry, HTTP API CRUD + validation + isolation |
+| Where | What it covers |
+|---|---|
+| `test_chat_scenarios.py` | The full turn: new user, create/retrieve/correct memories, follow-up without retrieval, cross-session recall, irrelevant memories excluded, brain down, LLM down, Hinglish, bounded tool loop, expiry, remember/forget, ephemeral, compaction, write-before-reply |
+| `test_basics.py` | Building blocks: routing rules and language detection, confidence/importance/decay maths, context layers inside their budgets, profile validation, structured-output retry, HTTP CRUD + isolation |
 
-With a provider key set, [`demo.http`](demo.http) is the live check: it replays the §13 walkthrough against real models.
+The eight required scenarios mapped to the tests that prove them, and how I would evaluate whether the brain is
+actually improving answers: [`docs/TESTING.md`](docs/TESTING.md).
 
-### Memory-accuracy eval (§16)
-
-```bash
-python -m eval.run_eval                     # runs the real extraction model (needs a provider key)
-```
-
-Reports storage-decision precision/recall at several confidence thresholds (validating the 0.6 default), label
-accuracy for `certainty` / `subject` / `type`, and missed/unexpected candidates. Results land in `eval/results/`.
-
-### Is the Shared Brain improving answers? (§16)
-
-Memory accuracy is the one dimension cheap enough to measure offline, so it is the part that ships as a script. The
-rest need a live pair of runs; the design is the same throughout — **hold the questions fixed and vary only the
-brain**, because without an A/B there is nothing to attribute an improvement to.
-
-The harness for all of them is one knob already in the API: `ephemeral: true` reads the brain but writes nothing, and
-a fresh `user_id` has no brain at all. So "brain off" needs no special build — replay the same script against a
-virgin user and compare.
-
-| Dimension | What I'd measure | How |
-|---|---|---|
-| **Memory accuracy** | Did it store the right things? | `python -m eval.run_eval`: precision/recall of the store/don't-store decision over 30 labelled messages, swept across confidence thresholds, plus per-label accuracy for `certainty` / `subject` / `type`. This is what validates the 0.6 threshold rather than asserting it. |
-| **Context relevance** | Of the memories injected, how many belonged? | `context_used` is returned on every `/chat` reply, so this is countable, not judged: label the expected memory keys per question, then report precision@k of the injected set. Scenario 6 is the single-case version — a health memory must not appear in a career answer. |
-| **Irrelevant context** | The same number read as a failure rate | The false-positive half of the above. It matters separately because the failure is silent: a wrong memory does not error, it just makes the answer subtly wrong. Watching it stops retrieval recall from being bought with noise. |
-| **Personalization** | Is the answer actually *about this user*? | Same 15 questions, brain on vs brain off, shuffled and scored blind by an LLM judge on three axes: uses a stored fact correctly, invents no fact that is not stored, and stays astrologically specific. Reporting win/tie/loss is more honest than a mean score. |
-| **Conversation consistency** | Does it contradict itself across sessions? | Replay multi-session scripts (the §13 walkthrough is one), then check every reply against the memories active at that turn and count contradictions. The correction case is the sharp one: after "actually this year, not next", any later mention of 2027 is a defect. |
-| **Memory persistence** | Does it survive the process? | Write memories, restart the container, assert the same recall in a new session with a new checkpointer thread. Scenario 5 covers the session boundary in-memory; this covers the storage boundary for real. |
-| **Cost / latency** | What is personalization costing? | `context_tokens` per layer is already in every response, so the context budget is measurable per turn; pair it with per-node latency from tracing. A brain that improves answers by 5% at triple the prompt size is a bad trade and should show up as one. |
-
-Two things I would watch out for rather than report as wins. An LLM judge scoring its own system's output is a
-generous judge — the blind shuffle is the minimum guard, and a couple of dozen human-labelled turns are worth more
-than a thousand judged ones. And aggregate quality can rise while the brain gets worse, because better answers also
-come from the model simply being good; that is the reason every dimension above is a *paired* comparison on the same
-question rather than an absolute score.
+With a provider key set, [`demo.http`](demo.http) is the live check: it replays the §13 walkthrough against real
+models.
 
 ## How a turn works
 
-1. **`load_session`** loads L0 (date, timezone, language), L1 (profile card) and L2 (memory index: one line per life
-   area). The checkpointer (thread = `user_id:session_id`) has already restored the session messages and summary.
-   Neo4j failure → `degraded: ["brain_unavailable"]`, continue with short-term context.
+1. **`load_session`** loads L0 (date, timezone, language), L1 (profile card, naming the slots still missing) and L2
+   (memory index: one line per life area). The checkpointer (thread = `user_id:session_id`) has already restored the
+   session messages and summary. Neo4j failure → `degraded: ["brain_unavailable"]`, continue on short-term context.
 2. **`analyze`** routes with rules first (follow-ups, remember/forget, "what do you remember", greetings); everything
-   else goes to the small model with structured output (route, life areas, language). Reply language precedence:
-   explicit request → language of the message → profile preference.
-3. **`answer_agent`** prefetches the top-k memories for the classified life areas (importance × confidence ×
-   recency), asks the strong model, and executes at most 2 rounds of read-only tool calls via the `fetch_context`
-   ToolNode. Memories that were used get `last_used_at` reinforced. Tool traffic is dropped from the persisted history.
-4. **`followup`** / **`memory_recall`** / **`memory_cmd`** / **`smalltalk`** as in §4; `memory_cmd` writes
-   synchronously (remember = extract with `user_asked_to_remember`, forget = `status: deleted`).
-5. **`maybe_compact`** incrementally summarises older turns when the session exceeds the budget, removes them with
-   `RemoveMessage`, persists the summary on the `Session` node (searchable by `search_past_sessions`).
-6. **`learn`** runs the **memory graph** *before* the reply nodes, for `answer` / `followup` / `memory_recall` turns
+   else goes to the small model with structured output (route, life areas, language). The classifier's route is then
+   checked against the message — `memory_cmd` acknowledges rather than answers, so it is only honoured where a real
+   remember/forget verb is present. Language precedence: explicit request → message → profile preference.
+3. **`learn`** runs the **memory graph** *before* any reply node, for `answer` / `followup` / `memory_recall`
    (never for smalltalk, memory commands or ephemeral chats): the small model extracts `MemoryCandidate`s (features
    only, canonical English, relative dates resolved), rules score and filter them, one `reconcile` runs per candidate
    via `Send`, and `write` applies ADD / UPDATE / SUPERSEDE / NOOP(reinforce) / PROFILE with `SUPERSEDES` and
-   `EXTRACTED_FROM` links. The reply then speaks from the refreshed profile, and any slot the validator refused is
-   named in its prompt so it can say so instead of restating an impossible value as fact (§11). Costs ~1.4 s/turn;
-   it buys a reply that cannot contradict the store, and a next turn that cannot race the write.
+   `EXTRACTED_FROM` links. The reply is then composed from the refreshed profile, and any slot the validator refused
+   is named in its prompt so it can say *which part* it could not use instead of restating it as fact (§11).
+   Costs ~1.4 s/turn; it buys a reply that cannot contradict the store, and a next turn that cannot race the write.
+4. **`answer_agent`** prefetches the top-k memories for the classified life areas (importance × confidence ×
+   recency), asks the strong model, and executes at most 2 rounds of read-only tool calls via the `fetch_context`
+   ToolNode. Memories used get `last_used_at` reinforced — except ones this same turn wrote. Tool traffic is dropped
+   from the persisted history.
+5. **`followup`** / **`memory_recall`** / **`memory_cmd`** / **`smalltalk`** as in §4; `memory_cmd` writes inline
+   (remember = extract with `user_asked_to_remember`, forget = `status: deleted`).
+6. **`maybe_compact`** incrementally summarises older turns when the session exceeds the budget, removes them with
+   `RemoveMessage`, persists the summary on the `Session` node (searchable by `search_past_sessions`).
 
 LLM nodes carry `RetryPolicy(max_attempts=2)` and a node-level `error_handler` that returns a canned reply with
 `degraded: ["llm_unavailable"]`; structured-output failures retry once with the validation error and then skip.
@@ -251,6 +230,8 @@ LLM nodes carry `RetryPolicy(max_attempts=2)` and a node-level `error_handler` t
 
 ## Production notes
 
-Queue the memory graph (Celery/Arq/SQS) instead of `BackgroundTasks`; use the Postgres checkpointer with a TTL;
-add a nightly job that marks memories `expired` (retrieval already excludes them at read time); wire LangSmith/Langfuse
-tracing around the graphs; keep provider keys out of the image (`.env`/secrets). See §17 of the architecture doc.
+Use the Postgres checkpointer with a TTL; add a nightly job that marks memories `expired` (retrieval already
+excludes them at read time); wire LangSmith/Langfuse tracing around the graphs; geocode `birth_place` rather than
+only shape-checking it; keep provider keys out of the image (`.env`/secrets). Moving the memory write off the turn
+would buy back ~1.4 s, but it reintroduces the race it was moved in to fix, so it needs a per-user write lock or a
+read-your-writes cache — not just a queue. See §17 of the architecture doc.
