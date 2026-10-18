@@ -80,7 +80,6 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     ephemeral: bool = False
     timezone: str | None = Field(default=None, max_length=64)
-    sync_memory: bool = Field(default=False, description="debug aid: run the memory graph before responding")
 
 
 class ToolCallOut(BaseModel):

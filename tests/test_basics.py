@@ -9,7 +9,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 
-from app.brain.models import Memory, MemoryCandidate, UserProfile
+from app.brain.models import Memory, MemoryCandidate, ScoredCandidate, UserProfile
 from app.brain.profile_validation import validate_profile_patch
 from app.brain.repository import apply_profile_patch
 from app.brain.scoring import initial_confidence, initial_importance, is_expired, rank_memories
@@ -137,7 +137,7 @@ def test_health_and_chat_response_shape(client):
 def test_console_page_and_memory_run_trace(client):
     """The /ui console is served, and the trace it polls reports what the memory graph did."""
     assert client.get("/ui/").status_code == 200
-    chat(client, "Planning to switch jobs next year.", sync_memory=True)
+    chat(client, "Planning to switch jobs next year.")
 
     runs = client.get("/users/rahul/memory-runs", params={"session_id": "s1"}).json()
     assert len(runs) == 1 and runs[0]["message"].startswith("Planning to switch")
@@ -191,3 +191,20 @@ def test_profile_layer_names_only_the_gaps():
     assert "Missing for a chart: time of birth" in layer
     assert "date of birth" not in layer.split("Missing for a chart:")[1]  # never re-ask for Delhi/the DOB
     assert "place of birth" not in layer.split("Missing for a chart:")[1]
+
+
+async def test_a_profile_slot_is_decided_by_its_key_not_the_guessed_type(repo, settings, fake_llm):
+    """Observed live: the same `birth_place` arrived as `life_event` on one turn and
+    `profile_fact` on the next, so one became a Memory node and the other a User field. Only
+    the User field is validated, so an impossible `tob` typed as `life_event` reached the
+    graph intact. The slot decides, not the type."""
+    from app.graphs.nodes.memory_ops import reconcile_candidate
+
+    for guessed in ("life_event", "profile_fact", "preference"):
+        candidate = ScoredCandidate(
+            type=guessed, key="tob", value="12:00 PM", life_area="general",
+            certainty="explicit", subject="self", temporality="current",
+            confidence=0.9, importance=0.8,
+        )
+        decision = await reconcile_candidate(fake_llm, repo, user_id="u", candidate=candidate)
+        assert decision["action"] == "PROFILE", guessed

@@ -1,4 +1,4 @@
-"""Response graph (§4): load_session → analyze → route → … → maybe_compact."""
+"""Response graph (§4): load_session → analyze → learn → route → … → maybe_compact."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from app.graphs.nodes.answer_agent import make_answer_agent, route_after_answer
 from app.graphs.nodes.common import llm_failure_handler
 from app.graphs.nodes.compact import make_maybe_compact
 from app.graphs.nodes.followup import make_followup
+from app.graphs.nodes.learn import make_learn
 from app.graphs.nodes.load_session import make_load_session
 from app.graphs.nodes.memory_cmd import make_memory_cmd
 from app.graphs.nodes.memory_recall import make_memory_recall
@@ -27,6 +28,7 @@ def build_response_graph(deps: Deps, checkpointer: BaseCheckpointSaver | None = 
     g = StateGraph(ChatState)
     g.add_node("load_session", make_load_session(deps))
     g.add_node("analyze", make_analyze(deps))
+    g.add_node("learn", make_learn(deps))
     g.add_node("answer_agent", make_answer_agent(deps), retry_policy=LLM_RETRY, error_handler=llm_failure_handler)
     g.add_node("fetch_context", ToolNode(deps.tools, name="fetch_context"))
     g.add_node("followup", make_followup(deps), retry_policy=LLM_RETRY, error_handler=llm_failure_handler)
@@ -37,8 +39,9 @@ def build_response_graph(deps: Deps, checkpointer: BaseCheckpointSaver | None = 
 
     g.add_edge(START, "load_session")
     g.add_edge("load_session", "analyze")
+    g.add_edge("analyze", "learn")
     g.add_conditional_edges(
-        "analyze",
+        "learn",
         route_from_state,
         {
             "answer": "answer_agent",

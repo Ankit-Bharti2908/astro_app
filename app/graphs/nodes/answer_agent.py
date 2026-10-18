@@ -68,6 +68,7 @@ def make_answer_agent(deps: Deps):
             memories=prefetched,
             summary=state.get("summary"),
             messages=state.get("messages", []),
+            refused=state.get("refused_details"),
             extra_system=SYSTEM_TOOLS_HINT if allow_tools else "",
         )
         context_used = merge_unique(ctx.context_used, tool_used)
@@ -98,9 +99,11 @@ def make_answer_agent(deps: Deps):
             }
 
         text = response.content.strip() or "I'm here — could you tell me a little more about what you'd like guidance on?"
-        if memory_ids and not brain_down and not state.get("ephemeral"):  # a temporary chat mutates nothing
+        fresh = set(state.get("written_this_turn", []))
+        recalled = [m for m in memory_ids if m not in fresh]  # this turn's own writes are not recall
+        if recalled and not brain_down and not state.get("ephemeral"):  # a temporary chat mutates nothing
             try:
-                await deps.repo.touch_used(state["user_id"], memory_ids, now=now)  # §7.4 reinforcement
+                await deps.repo.touch_used(state["user_id"], recalled, now=now)  # §7.4 reinforcement
             except BrainUnavailable:
                 degraded.append("brain_unavailable")
         return final_reply(

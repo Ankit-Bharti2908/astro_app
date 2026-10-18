@@ -204,7 +204,11 @@ async def reconcile_candidate(
     llm: LLMProvider, repo: BrainRepository, *, user_id: str, candidate: ScoredCandidate
 ) -> dict[str, Any]:
     """Rules first; the LLM arbitrates multi-valued ambiguity and cross-key conflicts (§7.5)."""
-    if candidate.type == "profile_fact" and candidate.key in PROFILE_KEYS:
+    # The slot decides this, not the type the extractor guessed. Observed: the same
+    # `birth_place` arrived as `life_event` in one turn and `profile_fact` in the next, so one
+    # became a Memory node and the other a User field — and the Memory branch never meets
+    # validate_profile_patch, which is how an impossible `tob` reached the graph (§7.5, §11).
+    if candidate.key in PROFILE_KEYS:
         return {"action": "PROFILE", "target_memory_id": None, "reason": "profile slot"}
 
     same_key = await repo.list_memories(user_id, keys=[candidate.key], statuses=("active",))

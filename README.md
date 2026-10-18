@@ -73,7 +73,7 @@ from the provider's usual variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …).
 | `POST` | `/chat` | Chat turn |
 | `GET` | `/users/{user_id}/memories?life_area=&status=active\|superseded\|deleted\|all` | Memories ranked by retrieval score |
 | `DELETE` | `/users/{user_id}/memories/{memory_id}` | Forget (soft delete, removed from retrieval) |
-| `GET` | `/users/{user_id}/memory-runs?session_id=&since=` | What the background memory graph did, per turn |
+| `GET` | `/users/{user_id}/memory-runs?session_id=&since=` | What the memory graph did, per turn |
 | `GET` | `/health` | Liveness + brain/LLM status |
 | `GET` | `/ui/` | The orchestration console (§ below) |
 
@@ -94,9 +94,9 @@ curl -s localhost:8000/chat -H 'content-type: application/json' -d '{
 }
 ```
 
-`ephemeral: true` reads memory but writes nothing. `sync_memory: true` (debug aid) runs the memory graph before
-responding so the next request is guaranteed to see the write. `degraded` reports `brain_unavailable` /
-`llm_unavailable` instead of failing the request.
+`ephemeral: true` reads memory but writes nothing. Every other turn writes *before* it replies, so the write is
+already durable when the response returns and the reply is composed on top of it. `degraded` reports
+`brain_unavailable` / `llm_unavailable` instead of failing the request.
 
 ## Orchestration console
 
@@ -109,9 +109,9 @@ chats against `/chat` and shows what each turn actually did:
   that a follow-up carries no memories and a career question carries `memory:career_change`.
 - **Agent tools** — each `recall_memories` / `get_astro_profile` / `search_past_sessions` call with its arguments
   and the result the model got back, or a note that the pre-loaded context was enough.
-- **Memory graph** — the background pipeline for that turn: extracted candidates → what the filter kept or dropped
+- **Memory graph** — the write pipeline for that turn: extracted candidates → what the filter kept or dropped
   and why → the reconcile action per candidate (`ADD` / `UPDATE` / `SUPERSEDE` / `NOOP` / `PROFILE` / `SKIP`) with
-  its reason → what was written. It polls `/users/{id}/memory-runs` because the graph runs after the reply.
+  its reason → what was written. It polls `/users/{id}/memory-runs`, which is complete by the time the reply lands.
 - **Shared brain** — every memory for the user, superseded ones greyed out, with confidence, importance and
   retrieval score.
 
@@ -146,7 +146,7 @@ docker-compose.yml · Dockerfile · demo.http
 ## Testing
 
 ```bash
-pytest -q                   # 36 tests, no network, no keys, no database needed: ~3 s
+pytest -q                   # 45 tests, no network, no keys, no database needed: ~3 s
 ruff check app tests eval
 ```
 
@@ -207,11 +207,13 @@ question rather than an absolute score.
    synchronously (remember = extract with `user_asked_to_remember`, forget = `status: deleted`).
 5. **`maybe_compact`** incrementally summarises older turns when the session exceeds the budget, removes them with
    `RemoveMessage`, persists the summary on the `Session` node (searchable by `search_past_sessions`).
-6. After the reply, the **memory graph** runs in the background for `answer` / `memory_recall` turns (never for
-   follow-ups, smalltalk, memory commands or ephemeral chats): the small model extracts `MemoryCandidate`s (features
+6. **`learn`** runs the **memory graph** *before* the reply nodes, for `answer` / `followup` / `memory_recall` turns
+   (never for smalltalk, memory commands or ephemeral chats): the small model extracts `MemoryCandidate`s (features
    only, canonical English, relative dates resolved), rules score and filter them, one `reconcile` runs per candidate
    via `Send`, and `write` applies ADD / UPDATE / SUPERSEDE / NOOP(reinforce) / PROFILE with `SUPERSEDES` and
-   `EXTRACTED_FROM` links.
+   `EXTRACTED_FROM` links. The reply then speaks from the refreshed profile, and any slot the validator refused is
+   named in its prompt so it can say so instead of restating an impossible value as fact (§11). Costs ~1.4 s/turn;
+   it buys a reply that cannot contradict the store, and a next turn that cannot race the write.
 
 LLM nodes carry `RetryPolicy(max_attempts=2)` and a node-level `error_handler` that returns a canned reply with
 `degraded: ["llm_unavailable"]`; structured-output failures retry once with the validation error and then skip.
@@ -238,7 +240,7 @@ LLM nodes carry `RetryPolicy(max_attempts=2)` and a node-level `error_handler` t
   avoids provider-specific forced-tool JSON modes (which newer Anthropic models reject).
 - **Token counting** is a 4-chars-per-token estimate; budgets are enforced on that estimate so no tokenizer download
   is needed. Swap `app/context/tokens.py` for a provider tokenizer if exact accounting matters.
-- **Prompts are XML-structured and versioned** (`app/prompts/templates.py`, `PROMPT_VERSION = "v4"`). Tagged sections
+- **Prompts are XML-structured and versioned** (`app/prompts/templates.py`, `PROMPT_VERSION = "v5"`). Tagged sections
   (`<task>`, `<rules>`, `<examples>`, …) let one rule be revised without disturbing the rest. Prompt text is
   English-only; the reply language is an instruction resolved against the meta layer.
 - **Routing rules live in the prompt, not in code.** `ANALYZE_SYSTEM` draws the line between the user *stating*

@@ -25,6 +25,8 @@ def make_load_session(deps: Deps):
         return {
             "profile": profile.model_dump(mode="json") if profile else None,
             "memory_index": index,
+            "refused_details": {},
+            "written_this_turn": [],
             "degraded": degraded,
             "timezone": state.get("timezone") or deps.settings.default_timezone,
             "route": "",

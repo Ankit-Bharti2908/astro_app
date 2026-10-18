@@ -5,11 +5,11 @@
 ### Health
 GET {{host}}/health
 
-### Row 1 — profile + goal in one message (sync_memory so the next request can see the write)
+### Row 1 — profile + goal in one message (the write completes before the reply returns)
 POST {{host}}/chat
 Content-Type: application/json
 
-{"user_id": "{{user}}", "session_id": "session-456", "message": "My name is Rahul, born 15 Aug 1995 in Delhi. Planning to switch jobs next year.", "sync_memory": true}
+{"user_id": "{{user}}", "session_id": "session-456", "message": "My name is Rahul, born 15 Aug 1995 in Delhi. Planning to switch jobs next year."}
 
 ### Profile derived from the message (sign = Leo)
 GET {{host}}/users/{{user}}
@@ -39,7 +39,7 @@ Content-Type: application/json
 POST {{host}}/chat
 Content-Type: application/json
 
-{"user_id": "{{user}}", "session_id": "session-789", "message": "Actually I'll switch this year, not next.", "sync_memory": true}
+{"user_id": "{{user}}", "session_id": "session-789", "message": "Actually I'll switch this year, not next."}
 
 ### History incl. superseded memory and SUPERSEDES link
 GET {{host}}/users/{{user}}/memories?status=all
@@ -48,7 +48,7 @@ GET {{host}}/users/{{user}}/memories?status=all
 POST {{host}}/chat
 Content-Type: application/json
 
-{"user_id": "{{user}}", "session_id": "session-789", "message": "I have a PM interview next month.", "sync_memory": true}
+{"user_id": "{{user}}", "session_id": "session-789", "message": "I have a PM interview next month."}
 
 ### Row 7 — Hinglish → language hinglish, nothing stored
 POST {{host}}/chat

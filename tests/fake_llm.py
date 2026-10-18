@@ -278,8 +278,15 @@ def rule_extract(message: str, today: date, context: str = "") -> list[dict[str,
         add(type="profile_fact", key="name", value=m.group(1).capitalize())
     m = re.search(r"\bborn (?:on )?(\d{1,2})(?:st|nd|rd|th)? ([A-Za-z]+),? (\d{4})(?: in ([A-Za-z][A-Za-z ]*?))?(?=[.,;]|$| and| planning)", text, flags=re.I)
     if m and m.group(2).lower() in _MONTHS:
-        dob = date(int(m.group(3)), _MONTHS[m.group(2).lower()], int(m.group(1)))
-        add(type="profile_fact", key="dob", value=dob.isoformat())
+        year, month, day = int(m.group(3)), _MONTHS[m.group(2).lower()], int(m.group(1))
+        try:
+            value = date(year, month, day).isoformat()
+        except ValueError:
+            # The real extractor hands over impossible dates rather than refusing them
+            # ("65 may 2200" -> "2200-05-65"); the stand-in has to do the same or the
+            # validation path below it is never exercised.
+            value = f"{year:04d}-{month:02d}-{day:02d}"
+        add(type="profile_fact", key="dob", value=value)
         if m.group(4):
             add(type="profile_fact", key="birth_place", value=m.group(4).strip().title())
     lang = explicit_language_request(text)

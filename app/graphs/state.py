@@ -28,6 +28,10 @@ class ChatState(TypedDict, total=False):
     explicit_language: str | None
     profile: dict[str, Any] | None
     memory_index: dict[str, dict[str, int]]
+    # profile slot -> why this turn's value was refused, for the reply to say so
+    refused_details: dict[str, str]
+    # memory ids this turn created or updated, excluded from "used" reinforcement
+    written_this_turn: list[str]
     prefetched_memories: list[dict[str, Any]]
     context_used: list[str]
     context_tokens: dict[str, int]

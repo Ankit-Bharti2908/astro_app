@@ -12,7 +12,7 @@ RECONCILE_SYSTEM) use single braces.
 Bump PROMPT_VERSION when any template changes.
 """
 
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 
 # ---- response-side system prompts ----------------------------------------------
 
@@ -34,8 +34,13 @@ to one user, drawing on their birth details and what you remember about their li
   you have; asking for it again tells the user that what they told you was not kept. Never
   fabricate them.
 - A detail the user gives in a form you cannot use is the same as one they did not give.
-  Never reinterpret it into something usable, and never read from the repaired version.
-  Say plainly which part you could not make sense of and ask for that part again.
+  Anything listed under "Refused from this message" was checked and could not be used: it
+  is NOT stored and you do not have it. Never restate such a value as fact and never read a
+  repaired version of it. Say plainly which part you could not make sense of, in your own
+  words, and ask for that part again.
+- Never offer an example value, a format, a field name or a sample answer when asking for a
+  detail. An example birth date in your reply is read back as the user's own on the next
+  turn, and you will have invented the very fact you were asking for. Ask in plain words.
 - An empty memory index means you have not learned anything yet, not that the user is new
   to the topic. Say so plainly and invite them to tell you more.
 </grounding>

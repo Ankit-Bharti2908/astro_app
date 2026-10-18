@@ -22,6 +22,7 @@ def make_followup(deps: Deps):
             memories=None,
             summary=state.get("summary"),
             messages=state.get("messages", []),
+            refused=state.get("refused_details"),
             extra_system=SYSTEM_FOLLOWUP,
         )
         response = await deps.llm.complete("followup", [LLMMessage("system", ctx.system_prompt), *ctx.messages])

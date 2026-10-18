@@ -7,7 +7,6 @@ from typing import Annotated, Any
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     HTTPException,
     Path,
     Query,
@@ -15,7 +14,7 @@ from fastapi import (
     Response,
     status,
 )
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 
 from app.api.schemas import (
     ID_PATTERN,
@@ -37,13 +36,6 @@ from app.prompts.templates import PROMPT_VERSION
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-# Which routes feed the memory graph. Routing answers "how should this reply be shaped?",
-# which is a different question from "is there anything here worth learning?" — so the two
-# must not share one decision. `followup` is in: a short continuation is exactly where a user
-# supplies the detail that was just asked for ("dophar 12 baje 30 min"), and leaving it out
-# meant the brain answered the turn and then forgot it. `memory_cmd` writes inline and
-# `smalltalk` carries nothing durable; ephemeral turns never write (§5).
-MEMORY_ROUTES = {"answer", "memory_recall", "followup"}
 UserId = Annotated[str, Path(min_length=1, max_length=128, pattern=ID_PATTERN)]
 
 
@@ -131,7 +123,7 @@ async def delete_memory(user_id: UserId, memory_id: str, request: Request):
 # ---- chat -----------------------------------------------------------------------
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(body: ChatRequest, background: BackgroundTasks, request: Request):
+async def chat(body: ChatRequest, request: Request):
     c = _container(request)
     now = c.deps.clock()
     inputs: dict[str, Any] = {
@@ -146,24 +138,11 @@ async def chat(body: ChatRequest, background: BackgroundTasks, request: Request)
         "configurable": {"thread_id": f"{body.user_id}:{body.session_id}"},
         "recursion_limit": c.settings.recursion_limit,
     }
+    # The `learn` node inside the graph runs the memory write before the reply is composed,
+    # so by the time this returns the write is durable and the reply already reflects it (§5).
     state = await c.response_graph.ainvoke(inputs, config=config)
 
     route = state.get("route") or "answer"
-    if route in MEMORY_ROUTES and not body.ephemeral:
-        payload = {
-            "user_id": body.user_id,
-            "session_id": body.session_id,
-            "message": body.message,
-            "now": now.isoformat(),
-            "language": state.get("language", "en"),
-            "ephemeral": body.ephemeral,
-            "context": _previous_assistant_reply(state),
-        }
-        if body.sync_memory:
-            await c.run_memory_graph(payload)
-        else:
-            background.add_task(c.run_memory_graph, payload)
-
     return ChatResponse(
         response=state.get("response", ""),
         user_id=body.user_id,
@@ -183,15 +162,6 @@ def _tools_used(state: dict[str, Any]) -> list[ToolCallOut]:
     return [ToolCallOut(**t) for t in state.get("tool_trace", [])]
 
 
-def _previous_assistant_reply(state: dict[str, Any]) -> str:
-    """The assistant turn *before* this turn's reply (reference resolution for extraction)."""
-    ai = [m for m in state.get("messages", []) if isinstance(m, AIMessage) and not m.tool_calls]
-    if len(ai) >= 2:
-        content = ai[-2].content
-        return content if isinstance(content, str) else str(content)
-    return state.get("summary") or ""
-
-
 # ---- memory graph trace ---------------------------------------------------------
 
 @router.get("/users/{user_id}/memory-runs", response_model=list[MemoryRunOut])
@@ -201,7 +171,7 @@ async def memory_runs(
     session_id: str | None = Query(default=None),
     since: int = Query(default=0, ge=0, description="only runs with seq > since"),
 ):
-    """What the background memory graph did, per turn: extracted candidates, what the filter
+    """What the memory graph did, per turn: extracted candidates, what the filter
     dropped, the reconcile decision per candidate and what was written (§5). Observability for
     the UI and for debugging — the writes themselves are visible via /users/{user_id}/memories."""
     c = _container(request)

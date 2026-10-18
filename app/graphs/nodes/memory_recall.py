@@ -46,6 +46,7 @@ def make_memory_recall(deps: Deps):
             memories=memories,
             summary=state.get("summary"),
             messages=state.get("messages", []),
+            refused=state.get("refused_details"),
             extra_system=SYSTEM_RECALL,
         )
         response = await deps.llm.complete("memory_recall", [LLMMessage("system", ctx.system_prompt), *ctx.messages])

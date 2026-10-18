@@ -63,6 +63,25 @@ def profile_layer(profile: UserProfile | None, budget: int) -> str:  # L1
     return truncate_to_budget(text, budget)
 
 
+SLOT_LABELS = {
+    "name": "name", "dob": "date of birth", "tob": "time of birth",
+    "birth_place": "place of birth", "preferred_language": "preferred language",
+}
+
+
+def refusals_layer(refused: dict[str, str], budget: int) -> str:  # L1b
+    """What this turn's message offered and the store would not take.
+
+    Without it the profile shows only `unknown`, which reads identically whether the user
+    never said anything or said something impossible — so the model fills the gap from the
+    transcript and restates the impossible value as fact (§11).
+    """
+    if not refused:
+        return ""
+    lines = [f"- {SLOT_LABELS.get(k, k)}: {v}" for k, v in refused.items()]
+    return truncate_to_budget("## Refused from this message (not stored)\n" + "\n".join(lines), budget)
+
+
 def index_layer(index: dict[str, dict[str, int]], budget: int) -> str:  # L2
     if not index:
         return "## Memory index\n(no long-term memories yet)"
@@ -162,9 +181,11 @@ def build_context(
     messages: list[AnyMessage],
     extra_system: str = "",
     include_index: bool = True,
+    refused: dict[str, str] | None = None,
 ) -> ContextBundle:
     meta = meta_layer(now, tz, language)
     l1 = profile_layer(profile, settings.budget_profile)
+    l1b = refusals_layer(refused or {}, settings.budget_profile)
     l2 = index_layer(memory_index, settings.budget_index) if include_index else ""
     l3, included = memories_layer(memories or [], settings.budget_memories)
     st_summary = summary_layer(summary, settings.budget_summary)
@@ -175,6 +196,8 @@ def build_context(
     if extra_system:
         blocks.append(extra_system)
     blocks.append(l1)
+    if l1b:
+        blocks.append(l1b)
     if l2:
         blocks.append(l2)
     if l3:
@@ -187,6 +210,8 @@ def build_context(
     context_used: list[str] = []
     if profile is not None:
         context_used.append("user_profile")
+    if l1b:
+        context_used.append("refused_details")
     if l2 and memory_index:
         context_used.append("memory_index")
     context_used += [f"memory:{m.key}" for m in included]
@@ -197,7 +222,7 @@ def build_context(
 
     tokens = {
         "meta": count_tokens(meta),
-        "profile": count_tokens(l1),
+        "profile": count_tokens(l1) + count_tokens(l1b),
         "index": count_tokens(l2),
         "memories": count_tokens(l3),
         "summary": count_tokens(st_summary),

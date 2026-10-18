@@ -324,10 +324,32 @@ def test_compaction_summarizes_and_persists_session(fake_llm, repo, clock):
         assert len(app.state.container.memory_runs) == 5
 
 
-def test_sync_memory_flag_runs_memory_graph_inline(client, app):
-    d = chat(client, "Planning to switch jobs next year.", sync_memory=True)
-    assert d["route"] == "answer" and memories(client)[0]["key"] == "career_change"
-    assert app.state.container.memory_runs[0]["result"]["written"][0]["action"] == "ADD"
+def test_the_write_is_durable_before_the_reply_returns(client, app):
+    """The memory graph runs inside the turn, not after it. A user who sends the next message
+    the instant the reply lands used to read a profile the background write had not reached —
+    observed live, with the model telling them their details were not saved."""
+    d = chat(client, "My name is Rahul, born 15 August 1995. Planning to switch jobs next year.")
+    assert d["route"] == "answer"
+    assert memories(client)[0]["key"] == "career_change"  # no sleep, no sync flag
+    assert client.get("/users/rahul").json()["dob"] == "1995-08-15"
+    actions = {w["action"] for w in app.state.container.memory_runs[0]["result"]["written"]}
+    assert actions == {"PROFILE", "ADD"}
+
+    # ... and the next turn therefore sees it, however fast it arrives.
+    assert "user_profile" in chat(client, "to career ka batao")["context_used"]
+
+
+def test_a_refused_birth_detail_is_told_to_the_reply(client, app, repo):
+    """A refusal is produced by the write path and was dying there. The reply has to know:
+    "unknown" and "you gave me something unusable" are different states, and only the second
+    one has anything to say back (§11)."""
+    d = chat(client, "I was born on 65 May 2200 in Delhi")
+    written = app.state.container.memory_runs[-1]["result"]["written"]
+    assert ("SKIP", "dob") in [(w["action"], w["key"]) for w in written]
+    assert "refused_details" in d["context_used"]
+    profile = client.get("/users/rahul").json()
+    assert profile["dob"] is None and profile["zodiac"] is None  # no plausible date invented
+    assert profile["birth_place"] == "Delhi"  # the usable half of the same sentence still lands
 
 
 def test_smalltalk_uses_profile_only(client, fake_llm, repo):

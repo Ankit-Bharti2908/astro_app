@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from langchain_core.tools import BaseTool
 
@@ -24,3 +25,5 @@ class Deps:
     llm: LLMProvider
     clock: Callable[[], datetime] = utc_now
     tools: list[BaseTool] = field(default_factory=list)
+    # Bound once the memory graph exists; the `learn` node runs it inside the turn (§5).
+    learn: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]] | None = None

@@ -33,7 +33,7 @@ def normalize_tob(value: Any) -> str:
     text = str(value).strip()
     m = _TIME_RE.match(text)
     if not m:
-        raise ValueError(f"{text!r} is not a time of birth (expected HH:MM, 24-hour or with am/pm)")
+        raise ValueError(f"{text!r} is not a real clock time")
     hour, minute, meridiem = int(m.group(1)), int(m.group(2)), (m.group(3) or "").lower()
     if minute > 59:
         raise ValueError(f"{text!r} has an impossible minute")
@@ -62,7 +62,7 @@ def normalize_dob(value: Any, *, today: date | None = None) -> date:
         try:
             parsed = date.fromisoformat(str(value).strip()[:10])
         except ValueError as exc:
-            raise ValueError(f"{value!r} is not a date (expected YYYY-MM-DD)") from exc
+            raise ValueError(f"{value!r} is not a real calendar date") from exc
     if parsed.year < MIN_BIRTH_YEAR:
         raise ValueError(f"{parsed.isoformat()} is before {MIN_BIRTH_YEAR}")
     if today is not None and parsed > today:

@@ -67,7 +67,7 @@ class Container:
     memory_runs: list[dict[str, Any]]
 
     async def run_memory_graph(self, payload: dict[str, Any]) -> dict[str, Any] | None:
-        """Background task: never raises (the user already has their reply)."""
+        """Never raises: a memory-graph failure degrades the turn, it does not fail the reply."""
         try:
             result = await self.memory_graph.ainvoke(payload)
             self.memory_runs.append({"payload": payload, "result": result})
@@ -94,7 +94,7 @@ def build_container(
     checkpointer = checkpointer or build_checkpointer(settings)
     deps = Deps(settings=settings, repo=repo, llm=llm, clock=clock or utc_now)
     deps.tools = make_tools(repo, settings, deps.clock)
-    return Container(
+    container = Container(
         settings=settings,
         repo=repo,
         llm=llm,
@@ -104,6 +104,8 @@ def build_container(
         memory_graph=build_memory_graph(deps),
         memory_runs=[],
     )
+    deps.learn = container.run_memory_graph  # the `learn` node runs the memory graph in-turn
+    return container
 
 
 def create_app(
