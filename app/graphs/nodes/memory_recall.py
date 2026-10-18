@@ -49,10 +49,11 @@ def make_memory_recall(deps: Deps):
         )
         response = await deps.llm.complete("memory_recall", [LLMMessage("system", ctx.system_prompt), *ctx.messages])
         text = response.content.strip() or "\n".join(m.as_line() for m in memories)
-        try:
-            await deps.repo.touch_used(state["user_id"], ctx.memory_ids, now=now)
-        except BrainUnavailable:
-            pass
+        if not state.get("ephemeral"):
+            try:
+                await deps.repo.touch_used(state["user_id"], ctx.memory_ids, now=now)
+            except BrainUnavailable:
+                pass
         return final_reply(state, text, context_used=ctx.context_used, context_tokens=ctx.context_tokens, memory_ids=ctx.memory_ids)
 
     return memory_recall

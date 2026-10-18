@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -149,11 +150,12 @@ class LiteLLMProvider(BaseLLMProvider):
             kwargs["tools"] = oa_tools
             kwargs["tool_choice"] = "auto"
         try:
-            resp = await self.router.acompletion(**kwargs)
-        except Exception as exc:  # LiteLLM raises OpenAI-style exceptions; all end the chain here
+            # Router: per-attempt timeout × retries × fallback; wait_for bounds the whole chain (§9 "primary with timeout")
+            resp = await asyncio.wait_for(self.router.acompletion(**kwargs), timeout=self.settings.llm_total_timeout_s)
+            parsed = parse_response(resp)
+        except Exception as exc:  # LiteLLM raises OpenAI-style exceptions; malformed responses end here too
             log.warning("LLM call failed task=%s group=%s error=%s: %s", task, group, type(exc).__name__, exc)
             raise LLMUnavailable(f"{type(exc).__name__}: {exc}") from exc
-        parsed = parse_response(resp)
         log.info("LLM ok task=%s model=%s usage=%s tool_calls=%d", task, parsed.model, parsed.usage, len(parsed.tool_calls))
         return parsed
 
@@ -163,9 +165,12 @@ class LiteLLMProvider(BaseLLMProvider):
             "openai": bool(os.getenv("OPENAI_API_KEY")),
             "gemini": bool(os.getenv("GEMINI_API_KEY")),
         }
+        configured = any(keys.values()) or any(
+            d["litellm_params"].get("api_key") or d["litellm_params"].get("api_base") for d in self.model_list
+        )
         return {
             "backend": "litellm",
-            "ok": True,
+            "ok": bool(configured),
             "models": {d["model_name"]: d["litellm_params"]["model"] for d in self.model_list},
             "provider_keys_present": keys,
         }

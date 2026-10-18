@@ -52,8 +52,8 @@ Everything is an environment variable (or `.env`); see [`app/config.py`](app/con
 | `STRONG_MODEL` | `anthropic/claude-opus-5-5` | LiteLLM model for `answer`, `memory_recall`, `followup` |
 | `SMALL_MODEL` | `anthropic/claude-haiku-5-5` | LiteLLM model for `analyze`, `extract`, `reconcile`, summarisation, smalltalk |
 | `FALLBACK_MODEL` | *(empty)* | Optional fallback provider/model, e.g. `openai/gpt-4o-mini`; the Router falls back to it when the primary fails |
-| `LLM_TIMEOUT_S` / `LLM_NUM_RETRIES` | `30` / `1` | Per-call timeout and Router retries before fallback |
-| `CHECKPOINTER` / `CHECKPOINTER_URL` | `memory` | `memory` (`InMemorySaver`) or `postgres` (`pip install -e ".[postgres]"`) |
+| `LLM_TIMEOUT_S` / `LLM_TOTAL_TIMEOUT_S` / `LLM_NUM_RETRIES` | `30` / `60` / `1` | Per-attempt timeout, hard ceiling per call (across retries and fallback), Router retries before fallback |
+| `NEO4J_CONNECT_TIMEOUT_S` / `NEO4J_MAX_RETRY_TIME_S` | `3` / `5` | Fail fast so an outage degrades instead of stalling |
 | `BUDGET_*` | 30/150/100/600/300/1200 | Token budgets per prompt layer (§3) |
 | `COMPACT_THRESHOLD_TOKENS` / `KEEP_LAST_MESSAGES` | `1200` / `6` | Session compaction (§8) |
 | `MAX_TOOL_ROUNDS` / `RECURSION_LIMIT` | `2` / `25` | Agent loop bounds (§4, §11) |
@@ -182,7 +182,11 @@ LLM nodes carry `RetryPolicy(max_attempts=2)` and a node-level `error_handler` t
 ## Implementation notes (where this goes beyond or refines the doc)
 
 - **Checkpointer thread id is `user_id:session_id`** (the doc says `session_id`): a session id alone could let one
-  user resume another's session. Likewise Neo4j `Session` nodes are keyed per user (`key = user_id:session_id`).
+  user resume another's session. Likewise Neo4j `Session` nodes are keyed per user (`key = user_id:session_id`);
+  ids are restricted to `[A-Za-z0-9_.@-]` so the separator cannot be forged. Turns are serialised per session
+  (an `asyncio.Lock` per thread) because the checkpointer is last-writer-wins under concurrent requests.
+- **"Forget" never guesses**: an explicit target is required ("forget my job plans"); "forget everything" wipes all
+  active memories; "forget that" asks which memory. Ephemeral turns never write, including forget.
 - **Extraction gets the previous assistant turn as *reference-only* context** so corrections such as "actually this
   year, not next" resolve against what was being discussed. The prompt forbids extracting facts from it; assistant
   text is still never a source of user facts.
@@ -198,6 +202,8 @@ LLM nodes carry `RetryPolicy(max_attempts=2)` and a node-level `error_handler` t
 
 ## Production notes
 
-Queue the memory graph (Celery/Arq/SQS) instead of `BackgroundTasks`; use the Postgres checkpointer with a TTL;
-add a nightly job that marks memories `expired` (retrieval already excludes them at read time); wire LangSmith/Langfuse
-tracing around the graphs; keep provider keys out of the image (`.env`/secrets). See §17 of the architecture doc.
+Not in this demo, needed before real traffic: **authentication** (every endpoint trusts the `user_id` in the path or
+body; put the service behind a gateway that injects a verified user id, or add an API-key/JWT dependency on the router);
+a Redis/Postgres checkpointer with a TTL instead of `InMemorySaver`; a queue (Celery/Arq/SQS) for the memory graph
+instead of `BackgroundTasks`; a nightly job that marks memories `expired` (retrieval already excludes them at read time);
+LangSmith/Langfuse tracing around the graphs; provider keys via secrets, not the image. See §17 of the architecture doc.

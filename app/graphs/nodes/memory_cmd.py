@@ -21,6 +21,7 @@ from app.llm.provider import LLMError
 from app.prompts.templates import (
     MEMORY_BRAIN_DOWN,
     MEMORY_EPHEMERAL,
+    MEMORY_FORGET_WHAT,
     MEMORY_FORGOTTEN,
     MEMORY_NOTHING_TO_FORGET,
     MEMORY_NOTHING_TO_SAVE,
@@ -32,6 +33,7 @@ log = logging.getLogger(__name__)
 
 _FORGET = re.compile(r"^(please\s+)?(forget|delete|remove|erase|don'?t remember|do not remember|bhool ja\w*)\s*(that|about|the|ki)?\s*", re.I)
 _REMEMBER = re.compile(r"^(please\s+)?(remember|note|save|store|don'?t forget|do not forget|yaad rakh\w*)\s*(that|ki)?\s*", re.I)
+_WIPE_ALL = {"everything", "all", "all memories", "everything about me", "all my memories", "sab kuch", "sab"}
 
 
 def make_memory_cmd(deps: Deps):
@@ -45,12 +47,25 @@ def make_memory_cmd(deps: Deps):
         if brain_down:
             return final_reply(state, pick(MEMORY_BRAIN_DOWN, language), context_used=[], context_tokens={})
 
-        if _FORGET.match(message):
-            target = _FORGET.sub("", message).strip(" .!?")
-            terms = search_terms(target) or [target.lower()]
+        is_forget = bool(_FORGET.match(message))
+        if state.get("ephemeral"):  # §12: ephemeral turns never write — neither remember nor forget
+            out = final_reply(state, pick(MEMORY_EPHEMERAL, language), context_used=[], context_tokens={})
+            out["memory_cmd_result"] = {"command": "forget" if is_forget else "remember", "stored": [], "deleted": [], "reason": "ephemeral"}
+            return out
+
+        if is_forget:
+            target = _FORGET.sub("", message).strip(" .!?").lower()
+            wipe_all = target in _WIPE_ALL
+            terms = search_terms(target)
+            if not terms and not wipe_all:  # "Forget that." / "Forget it" — never guess, never delete
+                out = final_reply(state, pick(MEMORY_FORGET_WHAT, language), context_used=[], context_tokens={})
+                out["memory_cmd_result"] = {"command": "forget", "deleted": [], "keys": [], "reason": "no_target"}
+                return out
             try:
                 memories = await deps.repo.list_memories(user_id)
-                hits = [m for m in memories if any(t in f"{m.key} {m.value}".lower().replace("_", " ") for t in terms)]
+                hits = memories if wipe_all else [
+                    m for m in memories if any(t in f"{m.key} {m.value}".lower().replace("_", " ") for t in terms)
+                ]
                 for m in hits:
                     await deps.repo.mark_deleted(user_id, m.id, now=now)
             except BrainUnavailable:
@@ -62,10 +77,6 @@ def make_memory_cmd(deps: Deps):
             return out
 
         # remember
-        if state.get("ephemeral"):
-            out = final_reply(state, pick(MEMORY_EPHEMERAL, language), context_used=[], context_tokens={})
-            out["memory_cmd_result"] = {"command": "remember", "stored": [], "reason": "ephemeral"}
-            return out
         body = _REMEMBER.sub("", message).strip() or message
         try:
             cands = await extract_candidates(deps.llm, message=body, now=now, tz=state.get("timezone") or deps.settings.default_timezone, user_asked=True, context=previous_assistant_text(state))

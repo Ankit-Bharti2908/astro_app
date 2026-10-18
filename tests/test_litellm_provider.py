@@ -174,6 +174,34 @@ async def test_no_fallback_configured_surfaces_failure(server):
     assert all(req["body"]["model"] == "mock-strong" for req in server.requests)
 
 
+async def test_malformed_provider_response_is_unavailable(server):
+    p = provider(server, with_fallback=False)
+    server.script("mock-strong", {"raw": {"id": "x", "object": "chat.completion", "created": 0, "model": "mock-strong", "choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1}}})
+    with pytest.raises(LLMUnavailable):
+        await p.complete("answer", CONVO)
+
+
+async def test_structured_retry_never_replays_empty_assistant_content(server):
+    p = provider(server)
+    server.script("mock-small", {"content": ""}, {"content": '{"action": "ADD"}'})
+    assert (await p.structured("reconcile", CONVO, Decision)).action == "ADD"
+    retry = server.requests_for("mock-small")[1]["body"]["messages"]
+    assert retry[-2]["role"] == "assistant" and retry[-2]["content"] == "(empty reply)"
+
+
+async def test_total_timeout_bounds_the_whole_retry_chain(server):
+    settings = make_settings(llm_backend="litellm", llm_timeout_s=5.0, llm_num_retries=3, llm_total_timeout_s=0.8)
+    p = LiteLLMProvider(settings, model_list=deployments(server))
+    server.always["mock-strong"] = {"delay": 3.0}
+    server.always["mock-fallback"] = {"delay": 3.0}
+    import time
+
+    t = time.perf_counter()
+    with pytest.raises(LLMUnavailable):
+        await p.complete("answer", CONVO)
+    assert time.perf_counter() - t < 2.5
+
+
 async def test_auth_error_is_unavailable_not_crash(server):
     p = provider(server, with_fallback=False)
     server.always["mock-strong"] = {"status": 401}
@@ -217,11 +245,15 @@ async def test_anthropic_structured_and_fallback(server):
     assert r.model.endswith("mock-fallback")
 
 
-async def test_healthcheck_reports_models_without_calling(server):
+async def test_healthcheck_reports_models_without_calling(server, monkeypatch):
     p = provider(server)
     h = await p.healthcheck()
     assert h["backend"] == "litellm" and h["models"]["strong"] == "openai/mock-strong" and "provider_keys_present" in h
-    assert server.requests == []
+    assert h["ok"] is True and server.requests == []  # api_base/api_key configured on the deployments
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    bare = LiteLLMProvider(make_settings(llm_backend="litellm"))
+    assert (await bare.healthcheck())["ok"] is False  # default models, no keys anywhere → degraded
 
 
 # ---- full stack: HTTP API → response graph → LiteLLM Router → mock provider -------------

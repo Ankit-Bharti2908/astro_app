@@ -153,18 +153,21 @@ class BaseLLMProvider(ABC):
     async def structured(self, task: str, messages: list[LLMMessage], schema: type[T]) -> T:
         prompt = with_json_instructions(messages, schema)
         last_error: Exception | None = None
+        max_tokens: int | None = None
         for attempt in range(self.structured_retries + 1):
-            response = await self.complete(task, prompt, max_tokens=None)
+            response = await self.complete(task, prompt, max_tokens=max_tokens)
             try:
                 data = extract_json(response.content)
                 return schema.model_validate(data)
             except (ValueError, ValidationError) as exc:
                 last_error = exc
                 log.warning("structured output invalid for task=%s attempt=%d: %s", task, attempt, exc)
+                if response.finish_reason == "length":  # truncated JSON: give the retry more room
+                    max_tokens = (max_tokens or 2048) * 2
                 # §9: retry once with the validation error in the prompt
                 prompt = [
                     *prompt,
-                    LLMMessage("assistant", response.content),
+                    LLMMessage("assistant", response.content or "(empty reply)"),
                     LLMMessage(
                         "user",
                         "Your previous reply was not valid for the schema. Error:\n"

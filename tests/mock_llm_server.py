@@ -42,7 +42,7 @@ class MockLLMServer:
 
     # ---- control ------------------------------------------------------------
     def script(self, model: str, *behaviours: dict[str, Any]) -> None:
-        """behaviour: {"content": str} | {"tool_calls": [{"name","args"}]} | {"status": int} | {"delay": s}"""
+        """behaviour: {"content": str} | {"tool_calls": [{"name","args"}]} | {"status": int} | {"delay": s} | {"raw": body}"""
         for b in behaviours:
             self.scripts[model].append(b)
 
@@ -93,6 +93,8 @@ class MockLLMServer:
                 status_code=beh["status"],
             )
             return body, beh, err
+        if "raw" in beh:
+            return body, beh, JSONResponse(beh["raw"])
         return body, beh, None
 
     @staticmethod

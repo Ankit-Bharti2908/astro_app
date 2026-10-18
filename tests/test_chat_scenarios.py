@@ -212,6 +212,33 @@ def test_memory_cmd_remember_and_forget(client):
     assert d["memory_cmd_result"]["deleted"] == [] and "nothing to forget" in d["response"]
 
 
+def test_forget_never_guesses_and_wipe_all_is_explicit(client):
+    chat(client, "Planning to switch jobs next year.")
+    chat(client, "Remember that I love classical music")
+    assert len(memories(client)) == 2
+    for msg in ("Forget that.", "Forget it", "forget this please"):
+        d = chat(client, msg)
+        assert d["route"] == "memory_cmd" and d["memory_cmd_result"] == {"command": "forget", "deleted": [], "keys": [], "reason": "no_target"}
+        assert "Which memory" in d["response"]
+    assert len(memories(client)) == 2
+    d = chat(client, "Forget my job plans")
+    assert d["memory_cmd_result"]["keys"] == ["career_change"] and [m["key"] for m in memories(client)] == ["classical_music"]
+    d = chat(client, "Forget everything")
+    assert d["memory_cmd_result"]["keys"] == ["classical_music"] and memories(client) == []
+
+
+def test_user_confirmation_sets_confidence_to_one(client, repo):
+    chat(client, "Planning to switch jobs next year.")
+    mem = memories(client)[0]
+    assert mem["confidence"] == 0.9 and mem["source"] == "stated"
+    d = chat(client, "Remember that I'm planning to switch jobs next year")  # same fact, explicit ask → confirm
+    assert d["memory_cmd_result"]["stored"][0]["action"] == "NOOP"
+    confirmed = memories(client)
+    assert len(confirmed) == 1 and confirmed[0]["id"] == mem["id"]
+    assert confirmed[0]["confidence"] == 1.0 and confirmed[0]["source"] == "confirmed" and confirmed[0]["mention_count"] == 2
+    assert list(repo.memories["rahul"].values())[0].last_confirmed_at == FIXED_NOW
+
+
 def test_ephemeral_reads_but_never_writes(client, app, repo):
     chat(client, "Planning to switch jobs next year.")
     d = chat(client, "I have a PM interview next month. What should I focus on?", ephemeral=True, session="tmp")
@@ -221,6 +248,11 @@ def test_ephemeral_reads_but_never_writes(client, app, repo):
     assert repo.sessions.get(("rahul", "tmp")) is None
     d = chat(client, "Remember that I love chess", ephemeral=True, session="tmp")
     assert d["memory_cmd_result"]["stored"] == [] and "temporary" in d["response"]
+    d = chat(client, "Forget my job plans", ephemeral=True, session="tmp")
+    assert d["memory_cmd_result"]["deleted"] == [] and d["memory_cmd_result"]["reason"] == "ephemeral"
+    assert [m["key"] for m in memories(client)] == ["career_change"]
+    # ephemeral reads do not reinforce last_used_at either
+    assert list(repo.memories["rahul"].values())[0].last_used_at is None
 
 
 def test_llm_down_returns_canned_reply_with_degraded_flag(client, fake_llm, app):
@@ -241,11 +273,36 @@ def test_llm_down_returns_canned_reply_with_degraded_flag(client, fake_llm, app)
 def test_language_precedence_explicit_then_message_then_profile(client, repo):
     client.post("/users", json={"user_id": "rahul", "name": "Rahul", "preferred_language": "hi"})
     assert chat(client, "hi")["language"] == "hi"  # too short to detect → profile preference
-    d = chat(client, "Reply in Hindi: what about my career?")
-    assert d["language"] == "hi"
-    assert client.get("/users/rahul").json()["preferred_language"] == "hi"
     assert chat(client, "What about my finances this year?")["language"] == "en"  # message language wins over profile
+    d = chat(client, "Reply in English: what about my career?")  # explicit request wins and is saved (§10)
+    assert d["language"] == "en"
+    assert client.get("/users/rahul").json()["preferred_language"] == "en"
+    assert chat(client, "hi")["language"] == "en"  # profile preference now English
     assert chat(client, "मेरी शादी कब होगी?")["language"] == "hi"
+
+
+async def test_concurrent_turns_on_one_session_are_serialized(settings, repo, clock):
+    import asyncio
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.llm.fake import FakeLLM
+
+    class SlowFake(FakeLLM):
+        async def complete(self, *a, **kw):
+            await asyncio.sleep(0.05)
+            return await super().complete(*a, **kw)
+
+    app = create_app(settings, repo=repo, llm=SlowFake(), clock=clock)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        body = {"user_id": "rahul", "session_id": "s1"}
+        r1, r2 = await asyncio.gather(
+            client.post("/chat", json={**body, "message": "Planning to switch jobs next year."}),
+            client.post("/chat", json={**body, "message": "What should I focus on for my career?"}),
+        )
+        assert r1.status_code == 200 and r2.status_code == 200
+    state = await app.state.container.response_graph.aget_state({"configurable": {"thread_id": "rahul:s1"}})
+    assert [type(m).__name__ for m in state.values["messages"]] == ["HumanMessage", "AIMessage", "HumanMessage", "AIMessage"]
 
 
 def test_compaction_summarizes_and_persists_session(fake_llm, repo, clock):

@@ -82,6 +82,16 @@ def test_build_context_layers_and_usage():
     assert ctx.memory_ids == ["m1"]
 
 
+def test_summary_and_meta_layers_respect_budgets():
+    from app.context.builder import meta_layer, summary_layer
+
+    long_summary = "We talked about careers and finances. " * 60
+    text = summary_layer(long_summary, 300)
+    assert text.startswith("## Earlier in this conversation") and count_tokens(text) <= 300
+    meta = meta_layer(NOW, "America/Argentina/ComodRivadavia", "hinglish", 30)
+    assert count_tokens(meta) <= 30 and "Reply language: hinglish" in meta
+
+
 def test_build_context_unknown_user():
     ctx = build_context(
         settings=make_settings(), now=NOW, tz="UTC", language="en", profile=None, memory_index={}, memories=None,

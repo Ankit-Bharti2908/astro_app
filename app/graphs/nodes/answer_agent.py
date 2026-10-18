@@ -95,7 +95,7 @@ def make_answer_agent(deps: Deps):
             }
 
         text = response.content.strip() or "I'm here — could you tell me a little more about what you'd like guidance on?"
-        if memory_ids and not brain_down:
+        if memory_ids and not brain_down and not state.get("ephemeral"):
             try:
                 await deps.repo.touch_used(state["user_id"], memory_ids, now=now)  # §7.4 reinforcement
             except BrainUnavailable:

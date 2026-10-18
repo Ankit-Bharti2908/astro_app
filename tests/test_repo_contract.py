@@ -26,6 +26,12 @@ async def test_users(any_repo):
     updated = await repo.update_user(uid, {"dob": date(1996, 1, 5), "preferred_language": "hi"}, now=FIXED_NOW + timedelta(days=1))
     assert updated.zodiac == "Capricorn" and updated.name == "Rahul" and updated.preferred_language == "hi"
     assert updated.updated_at == FIXED_NOW + timedelta(days=1)
+    # a session or memory write alone must not make the user "exist" as a profile
+    bare = unique_user()
+    await repo.upsert_session(bare, "s1", now=FIXED_NOW, turn_increment=1)
+    assert await repo.get_user(bare) is None
+    assert (await repo.create_user(UserProfile(user_id=bare, name="Late Signup"), now=FIXED_NOW)).name == "Late Signup"
+    assert (await repo.get_user(bare)).name == "Late Signup"
     # update_user upserts unknown users (profile facts can arrive before signup)
     other = unique_user()
     assert (await repo.update_user(other, {"name": "Priya"}, now=FIXED_NOW)).name == "Priya"

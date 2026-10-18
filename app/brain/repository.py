@@ -76,6 +76,10 @@ def apply_profile_patch(profile: UserProfile, patch: dict[str, Any], now: dateti
 
 
 def search_terms(query: str) -> list[str]:
-    stop = {"the", "a", "an", "my", "me", "i", "about", "what", "do", "you", "remember", "of", "in", "for", "to", "is", "are", "and"}
+    stop = {
+        "the", "a", "an", "my", "me", "i", "about", "what", "do", "you", "remember", "of", "in", "for", "to", "is",
+        "are", "and", "that", "this", "those", "these", "it", "please", "now", "again", "also", "just", "with",
+        "from", "was", "were", "have", "has", "had", "will", "would", "can", "could", "should", "told", "said",
+    }
     terms = [t.strip("?.,!").lower() for t in query.split()]
     return [t for t in terms if len(t) > 2 and t not in stop]

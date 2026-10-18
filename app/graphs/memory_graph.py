@@ -16,9 +16,10 @@ from app.graphs.nodes.memory_nodes import (
     make_write,
 )
 from app.graphs.state import MemoryState
-from app.llm.provider import LLMError
+from app.llm.provider import LLMUnavailable
 
-LLM_RETRY = RetryPolicy(max_attempts=2, initial_interval=0.2, max_interval=1.0, retry_on=LLMError)
+# retry transport failures only; a schema failure already retried once inside structured() (§9)
+LLM_RETRY = RetryPolicy(max_attempts=2, initial_interval=0.2, max_interval=1.0, retry_on=LLMUnavailable)
 
 
 def build_memory_graph(deps: Deps):

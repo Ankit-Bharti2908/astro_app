@@ -45,6 +45,7 @@ class MemoryState(TypedDict, total=False):
     now: str
     language: str
     ephemeral: bool
+    timezone: str
     context: str  # previous assistant reply, reference-resolution only
 
     candidates: list[dict[str, Any]]

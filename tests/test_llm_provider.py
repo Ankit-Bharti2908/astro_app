@@ -47,6 +47,14 @@ async def test_structured_retries_once_with_validation_error():
     assert "not valid for the schema" in retry_prompt[-1].content
 
 
+async def test_structured_retry_grows_max_tokens_after_truncation():
+    fake = FakeLLM()
+    fake.script("extract", LLMResponse(content='{"route": "ans', finish_reason="length"), {"route": "answer"})
+    assert (await fake.structured("extract", [LLMMessage("user", "x")], Out)).route == "answer"
+    # the second call asked for more room (FakeLLM records max_tokens via the call list length only; check via messages)
+    assert len(fake.calls_for("extract")) == 2
+
+
 async def test_structured_gives_up_after_retry():
     fake = FakeLLM()
     fake.script("analyze", "garbage", {"route": 5})  # second is invalid type too

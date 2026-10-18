@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections import defaultdict, deque
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -46,10 +48,7 @@ def build_llm(settings: Settings) -> LLMProvider:
 
 
 def build_checkpointer(settings: Settings) -> BaseCheckpointSaver:
-    if settings.checkpointer == "postgres":
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # optional dependency
-
-        return AsyncPostgresSaver.from_conn_string(settings.checkpointer_url)  # type: ignore[return-value]
+    # Demo scope: in-process saver. Production swaps in a Redis/Postgres saver (§17) via create_app(checkpointer=...).
     return InMemorySaver()
 
 
@@ -62,7 +61,12 @@ class Container:
     checkpointer: BaseCheckpointSaver
     response_graph: Any
     memory_graph: Any
-    memory_runs: list[dict[str, Any]]
+    memory_runs: deque[dict[str, Any]]  # recent background runs (bounded) for debugging/tests
+    _locks: defaultdict[str, asyncio.Lock] = field(default_factory=lambda: defaultdict(asyncio.Lock))
+
+    def lock_for(self, thread_id: str) -> asyncio.Lock:
+        """Serialize turns per session so concurrent requests cannot fork the checkpoint."""
+        return self._locks[thread_id]
 
     async def run_memory_graph(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Background task: never raises (the user already has their reply)."""
@@ -98,7 +102,7 @@ def build_container(
         checkpointer=checkpointer,
         response_graph=build_response_graph(deps, checkpointer),
         memory_graph=build_memory_graph(deps),
-        memory_runs=[],
+        memory_runs=deque(maxlen=200),
     )
 
 

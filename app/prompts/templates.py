@@ -7,7 +7,7 @@ Rules:
 - Use ONLY the user facts given below (profile, memories, tool results). Never invent facts about the user.
 - If a question needs birth details you do not have, give general guidance and ask for date, time and place of birth.
 - Astrology is guidance, not certainty: avoid absolute predictions about health, legal or financial outcomes.
-- Keep replies concise (under 180 words) and reply in the requested language. For `hinglish`, write Hindi in Latin script mixed naturally with English; for `hi`, write in Devanagari."""
+- Keep replies concise (under 180 words) and reply in the requested language: `en` English; `hi` Hindi in Devanagari; `hinglish` romanised Hindi mixed naturally with English."""
 
 SYSTEM_TOOLS_HINT = """You may call tools to fetch more context about the user when the memory index shows something relevant that is not loaded. Call a tool only if it would change your answer."""
 
@@ -65,7 +65,7 @@ Decide exactly one action:
 - SUPERSEDE: the candidate replaces an existing memory (correction: "actually this year, not next") → target_memory_id.
 - NOOP: duplicate of an existing memory → target_memory_id.
 Source priority: an explicit correction beats a direct statement, which beats an earlier statement.
-Return: {{"action": "...", "target_memory_id": "<id or null>", "merged_attributes": {{...}} or null, "reason": "<short>"}}"""
+Return: {"action": "...", "target_memory_id": "<id or null>", "merged_attributes": {...} or null, "reason": "<short>"}"""
 
 RECONCILE_USER = """EXISTING MEMORIES (JSON):
 {existing}
@@ -118,6 +118,11 @@ MEMORY_FORGOTTEN = {
     "en": "Done — I've forgotten: {items}.",
     "hi": "हो गया — मैंने भुला दिया: {items}।",
     "hinglish": "Ho gaya — maine bhula diya: {items}.",
+}
+MEMORY_FORGET_WHAT = {
+    "en": "Which memory should I forget? Name the topic, e.g. “forget my job plans” — or say “forget everything”.",
+    "hi": "मैं कौन सी स्मृति भुलाऊँ? विषय बताइए, जैसे “forget my job plans” — या कहिए “forget everything”।",
+    "hinglish": "Main kaunsi memory bhulaun? Topic batao, jaise “forget my job plans” — ya bolo “forget everything”.",
 }
 MEMORY_NOTHING_TO_FORGET = {
     "en": "I don't have a stored memory matching that, so there's nothing to forget.",

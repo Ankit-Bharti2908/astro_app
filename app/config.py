@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,21 +16,19 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "neo4j"
     neo4j_database: str = "neo4j"
+    neo4j_connect_timeout_s: float = 3.0   # fail fast → degraded reply, not a 35 s stall
+    neo4j_max_retry_time_s: float = 5.0
 
     # LLM
     llm_backend: Literal["litellm", "fake"] = "litellm"
     strong_model: str = "anthropic/claude-opus-5-5"
     small_model: str = "anthropic/claude-haiku-5-5"
     fallback_model: str = ""
-    llm_timeout_s: float = 30.0
+    llm_timeout_s: float = 30.0          # per attempt (Router)
+    llm_total_timeout_s: float = 60.0    # hard ceiling per complete() call, across retries + fallback
     llm_num_retries: int = 1
-    llm_json_mode: bool = False  # ask providers for native JSON mode when they support it
     llm_max_tokens_answer: int = 1024
     llm_max_tokens_small: int = 800
-
-    # Short-term memory
-    checkpointer: Literal["memory", "postgres"] = "memory"
-    checkpointer_url: str = ""
 
     # Context budgets (tokens) — §3
     budget_meta: int = 30
@@ -55,7 +52,6 @@ class Settings(BaseSettings):
 
     default_timezone: str = "Asia/Kolkata"
     log_level: str = "INFO"
-    prompt_version: str = Field(default="v1")
 
 
 def get_settings(**overrides) -> Settings:

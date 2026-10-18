@@ -38,7 +38,7 @@ def make_extract(deps: Deps):
             deps.llm,
             message=state["message"],
             now=_now(state.get("now"), deps.clock),
-            tz=deps.settings.default_timezone,
+            tz=state.get("timezone") or deps.settings.default_timezone,
             context=state.get("context", ""),
         )
         return {"candidates": [c.model_dump(mode="json") for c in cands]}
@@ -88,8 +88,9 @@ def make_reconcile(deps: Deps):
         try:
             decision = await reconcile_candidate(deps.llm, deps.repo, user_id=payload["user_id"], candidate=cand)
         except BrainUnavailable as exc:
+            # only `decisions` has a reducer; parallel Send tasks must not all write `degraded` (write derives it)
             log.warning("reconcile: brain unavailable: %s", exc)
-            return {"decisions": [{"candidate": payload["candidate"], "action": "SKIP", "reason": "brain_unavailable"}], "degraded": ["brain_unavailable"]}
+            return {"decisions": [{"candidate": payload["candidate"], "action": "SKIP", "reason": "brain_unavailable"}]}
         return {"decisions": [{"candidate": payload["candidate"], **decision}]}
 
     return reconcile
@@ -116,6 +117,8 @@ def make_write(deps: Deps):
                 log.warning("write skipped (brain unavailable): %s", exc)
                 degraded.append("brain_unavailable")
                 written.append({"action": "SKIP", "key": cand.key, "reason": "brain_unavailable"})
+        if any(w.get("reason") == "brain_unavailable" for w in written) and "brain_unavailable" not in degraded:
+            degraded.append("brain_unavailable")
         log.info("memory graph wrote %s", [(w["action"], w["key"]) for w in written])
         return {"written": written, "degraded": degraded}
 

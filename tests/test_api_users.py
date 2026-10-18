@@ -38,6 +38,14 @@ async def test_memory_listing_filters_and_delete(client, repo):
 
 def test_chat_validation(client):
     assert client.post("/chat", json={"user_id": "u", "session_id": "s", "message": ""}).status_code == 422
+    # ids cannot contain the composite-key separator (or whitespace); timezone must be a real IANA zone
+    assert client.post("/chat", json={"user_id": "org:uid", "session_id": "s", "message": "hi"}).status_code == 422
+    assert client.post("/chat", json={"user_id": "u", "session_id": "uid:s1", "message": "hi"}).status_code == 422
+    assert client.post("/chat", json={"user_id": "u", "session_id": "s", "message": "hi", "timezone": "Mars/Olympus"}).status_code == 422
+    assert client.post("/chat", json={"user_id": "a.b@c-d_e", "session_id": "s", "message": "hi", "timezone": "Europe/London"}).status_code == 200
+    assert client.post("/users", json={"user_id": "bad:id"}).status_code == 422
+    assert client.get("/users/bad:id").status_code == 422
+    assert client.get("/users/bad:id/memories").status_code == 422
     assert client.post("/chat", json={"user_id": "u", "message": "hi"}).status_code == 422
     r = client.post("/chat", json={"user_id": "u", "session_id": "s", "message": "x" * 4001})
     assert r.status_code == 422 and r.json()["detail"][0]["loc"] == ["body", "message"]

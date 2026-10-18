@@ -14,8 +14,6 @@ from app.context.tokens import count_tokens, truncate_to_budget
 from app.llm.provider import LLMMessage, ToolCall
 from app.prompts.templates import SYSTEM_BASE
 
-LANGUAGE_NAMES = {"en": "English", "hi": "Hindi (Devanagari)", "hinglish": "Hinglish (romanised Hindi mixed with English)"}
-
 
 @dataclass
 class ContextBundle:
@@ -28,15 +26,16 @@ class ContextBundle:
 
 # ---- layers -----------------------------------------------------------------
 
-def meta_layer(now: datetime, tz: str, language: str) -> str:  # L0
+def meta_layer(now: datetime, tz: str, language: str, budget: int = 30) -> str:  # L0
     try:
         local = now.astimezone(ZoneInfo(tz))
     except Exception:  # unknown tz → keep UTC
         local = now
-    return (
+    text = (
         f"Current date: {local.date().isoformat()} ({local.strftime('%A')}). "
-        f"Timezone: {tz}. Reply language: {language} ({LANGUAGE_NAMES.get(language, language)})."
+        f"Timezone: {tz}. Reply language: {language}."
     )
+    return truncate_to_budget(text, budget)
 
 
 def profile_layer(profile: UserProfile | None, budget: int) -> str:  # L1
@@ -87,7 +86,7 @@ def memories_layer(memories: list[Memory], budget: int) -> tuple[str, list[Memor
 def summary_layer(summary: str | None, budget: int) -> str:
     if not summary:
         return ""
-    return "## Earlier in this conversation\n" + truncate_to_budget(summary, budget)
+    return truncate_to_budget("## Earlier in this conversation\n" + summary, budget)
 
 
 def to_llm_message(m: AnyMessage) -> LLMMessage | None:
@@ -153,7 +152,7 @@ def build_context(
     extra_system: str = "",
     include_index: bool = True,
 ) -> ContextBundle:
-    meta = meta_layer(now, tz, language)
+    meta = meta_layer(now, tz, language, settings.budget_meta)
     l1 = profile_layer(profile, settings.budget_profile)
     l2 = index_layer(memory_index, settings.budget_index) if include_index else ""
     l3, included = memories_layer(memories or [], settings.budget_memories)

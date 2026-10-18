@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from app.brain.memory_repo import InMemoryBrainRepository
 from app.brain.models import MemoryCandidate, ScoredCandidate
@@ -125,6 +125,36 @@ async def test_memory_graph_fans_out_and_is_idempotent():
     fake.fail_tasks.clear()
     out4 = await graph.ainvoke({**payload, "ephemeral": True, "message": "I prefer evening walks."})
     assert out4.get("skipped_reason") == "ephemeral"
+
+
+async def test_memory_graph_degrades_when_brain_is_down_with_parallel_candidates():
+    from tests.conftest import FailingRepo
+
+    settings, repo, fake = make_settings(), FailingRepo(), FakeLLM()
+    deps = Deps(settings=settings, repo=repo, llm=fake, clock=lambda: FIXED_NOW)
+    graph = build_memory_graph(deps)
+    out = await graph.ainvoke({"user_id": "u1", "session_id": "s1", "now": FIXED_NOW.isoformat(), "language": "en", "ephemeral": False,
+                               "message": "I love classical music and I prefer morning meetings."})
+    assert [w["action"] for w in out["written"]] == ["SKIP", "SKIP"] and out["degraded"] == ["brain_unavailable"]
+    assert all(w["reason"] == "brain_unavailable" for w in out["written"])
+
+
+async def test_memory_graph_resolves_dates_in_request_timezone():
+    from datetime import datetime
+
+    settings, repo, fake = make_settings(), InMemoryBrainRepository(), FakeLLM()
+    near_midnight = datetime(2027, 1, 1, 7, 0, tzinfo=UTC)  # still 2026-12-31 in Los Angeles
+    deps = Deps(settings=settings, repo=repo, llm=fake, clock=lambda: near_midnight)
+    graph = build_memory_graph(deps)
+    base = {"user_id": "u1", "session_id": "s1", "now": near_midnight.isoformat(), "language": "en", "ephemeral": False,
+            "message": "Planning to switch jobs next year."}
+    await graph.ainvoke({**base, "timezone": "America/Los_Angeles"})
+    system = next(m.content for m in fake.calls_for("extract")[-1].messages if m.role == "system")
+    assert "Current date: 2026-12-31" in system and "Timezone: America/Los_Angeles" in system
+    assert (await repo.list_memories("u1"))[0].attributes["target_year"] == 2027
+    await graph.ainvoke({**base, "session_id": "s2"})  # default timezone (Asia/Kolkata) → already 2027
+    system = next(m.content for m in fake.calls_for("extract")[-1].messages if m.role == "system")
+    assert "Current date: 2027-01-01" in system
 
 
 async def test_extract_prompt_contains_date_context_and_message():

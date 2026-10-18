@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.api.schemas import (
+    ID_PATTERN,
     ChatRequest,
     ChatResponse,
     HealthOut,
@@ -26,6 +36,7 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 MEMORY_ROUTES = {"answer", "memory_recall"}  # §5: skipped for followup, smalltalk, memory_cmd, ephemeral
+UserId = Annotated[str, Path(min_length=1, max_length=128, pattern=ID_PATTERN)]
 
 
 def _container(request: Request):
@@ -51,7 +62,7 @@ async def create_user(body: UserCreate, request: Request):
 
 
 @router.get("/users/{user_id}", response_model=UserOut)
-async def get_user(user_id: str, request: Request):
+async def get_user(user_id: UserId, request: Request):
     c = _container(request)
     try:
         profile = await c.repo.get_user(user_id)
@@ -63,7 +74,7 @@ async def get_user(user_id: str, request: Request):
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
-async def patch_user(user_id: str, body: UserPatch, request: Request):
+async def patch_user(user_id: UserId, body: UserPatch, request: Request):
     c = _container(request)
     patch = body.model_dump(exclude_unset=True)
     try:
@@ -79,7 +90,7 @@ async def patch_user(user_id: str, body: UserPatch, request: Request):
 
 @router.get("/users/{user_id}/memories", response_model=list[MemoryOut])
 async def list_memories(
-    user_id: str,
+    user_id: UserId,
     request: Request,
     life_area: str | None = Query(default=None),
     status_filter: str = Query(default="active", alias="status", pattern="^(active|superseded|expired|deleted|all)$"),
@@ -98,7 +109,7 @@ async def list_memories(
 
 
 @router.delete("/users/{user_id}/memories/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_memory(user_id: str, memory_id: str, request: Request):
+async def delete_memory(user_id: UserId, memory_id: str, request: Request):
     c = _container(request)
     try:
         ok = await c.repo.mark_deleted(user_id, memory_id, now=c.deps.clock())
@@ -115,19 +126,19 @@ async def delete_memory(user_id: str, memory_id: str, request: Request):
 async def chat(body: ChatRequest, background: BackgroundTasks, request: Request):
     c = _container(request)
     now = c.deps.clock()
+    tz = body.timezone or c.settings.default_timezone
+    thread_id = f"{body.user_id}:{body.session_id}"
     inputs: dict[str, Any] = {
         "messages": [HumanMessage(content=body.message)],
         "user_id": body.user_id,
         "session_id": body.session_id,
         "ephemeral": body.ephemeral,
         "now": now.isoformat(),
-        "timezone": body.timezone or c.settings.default_timezone,
+        "timezone": tz,
     }
-    config = {
-        "configurable": {"thread_id": f"{body.user_id}:{body.session_id}"},
-        "recursion_limit": c.settings.recursion_limit,
-    }
-    state = await c.response_graph.ainvoke(inputs, config=config)
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": c.settings.recursion_limit}
+    async with c.lock_for(thread_id):  # one turn at a time per session (checkpoint is last-writer-wins)
+        state = await c.response_graph.ainvoke(inputs, config=config)
 
     route = state.get("route") or "answer"
     if route in MEMORY_ROUTES and not body.ephemeral:
@@ -138,6 +149,7 @@ async def chat(body: ChatRequest, background: BackgroundTasks, request: Request)
             "now": now.isoformat(),
             "language": state.get("language", "en"),
             "ephemeral": body.ephemeral,
+            "timezone": tz,
             "context": _previous_assistant_reply(state),
         }
         if body.sync_memory:
