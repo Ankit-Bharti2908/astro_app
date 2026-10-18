@@ -20,7 +20,7 @@ POST /chat ──► response graph (reads brain) ──► reply
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-make run-fake                     # http://localhost:8000/docs
+LLM_BACKEND=fake uvicorn app.main:app --reload      # http://localhost:8000/docs
 ```
 
 ### 2. Full stack with Docker (Neo4j + API)
@@ -37,7 +37,7 @@ Then replay the walkthrough from the architecture doc with [`demo.http`](demo.ht
 ```bash
 export BRAIN_BACKEND=neo4j NEO4J_URI=bolt://localhost:7687 NEO4J_PASSWORD=...
 export ANTHROPIC_API_KEY=...      # LiteLLM reads provider keys directly
-make run
+uvicorn app.main:app --reload
 ```
 
 ## Configuration
@@ -113,17 +113,17 @@ app/
 ├── context/builder.py      # L0–L3 + ST layers with token budgets
 ├── profile/zodiac.py       # sun-sign stub
 └── prompts/templates.py    # versioned prompts (PROMPT_VERSION recorded on every memory)
-tests/                      # 90+ tests; see below
+tests/                      # see below
 eval/                       # labelled set + storage-accuracy / threshold-sweep script
 docs/ARCHITECTURE.md        # the design this implements
-docker-compose.yml · Dockerfile · demo.http · Makefile
+docker-compose.yml · Dockerfile · demo.http
 ```
 
 ## Testing
 
 ```bash
-make test                   # everything that needs no network: 93 tests in ~10 s
-make lint
+pytest -q                   # no network, no keys, no database needed: ~10 s
+ruff check app tests eval
 ```
 
 | Layer | Where | What it proves |
@@ -136,7 +136,8 @@ make lint
 | HTTP API | `test_api_users.py` | CRUD, validation (422), isolation by `user_id`, soft delete, health |
 | Repository contract | `test_repo_contract.py` | Same contract run against the in-memory repo **and real Neo4j** (`NEO4J_TEST_URI`) |
 | **Every LLM API path** | `test_litellm_provider.py` | Real LiteLLM Router against a local mock provider that speaks both the **OpenAI** and **Anthropic** wire formats: task→tier routing, request shape (system, tools, `max_tokens`, auth headers), tool-call parsing both ways, structured retry through the router, fallback on 5xx / 429 / 529 / timeout, all-down → `LLMUnavailable`, and the full HTTP → graph → Router → mock stack including a mid-conversation outage |
-| Live providers (opt-in) | `tests/live/`, `scripts/live_llm_check.py` | Runs every task once against the configured real models: `LIVE_LLM=1 ANTHROPIC_API_KEY=… pytest tests/live -m live` or `make live-llm` |
+
+With a provider key set, [`demo.http`](demo.http) is the live check: it replays the §13 walkthrough against real models.
 
 Against a real Neo4j (e.g. `docker compose up neo4j`):
 
@@ -147,7 +148,7 @@ NEO4J_TEST_URI=bolt://localhost:7687 NEO4J_TEST_USER=neo4j NEO4J_TEST_PASSWORD=p
 ### Memory-accuracy eval (§16)
 
 ```bash
-make eval                   # offline, deterministic
+python -m eval.run_eval --backend fake      # offline, deterministic
 python -m eval.run_eval --backend litellm   # with the real extraction model
 ```
 

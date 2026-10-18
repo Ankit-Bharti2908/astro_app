@@ -28,10 +28,7 @@ include = ["app*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-markers = [
-  "live: hits a real LLM provider; needs LIVE_LLM=1 and provider API keys",
-  "neo4j: needs a reachable Neo4j (NEO4J_TEST_URI)",
-]
+markers = ["neo4j: needs a reachable Neo4j (NEO4J_TEST_URI)"]
 filterwarnings = ["ignore::DeprecationWarning", "ignore::pydantic.warnings.PydanticDeprecatedSince20"]
 
 [tool.ruff]
