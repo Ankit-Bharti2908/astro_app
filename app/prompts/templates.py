@@ -12,7 +12,7 @@ RECONCILE_SYSTEM) use single braces.
 Bump PROMPT_VERSION when any template changes.
 """
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 # ---- response-side system prompts ----------------------------------------------
 
@@ -238,7 +238,11 @@ wrong entry outlives the conversation that caused it and is never questioned aga
 missing fact costs one follow-up question; a wrong one corrupts every later reading.
 Admit a candidate only when all three hold:
 - The user asserted it about themselves in their own words — not implied, not inferred
-  from what they asked about, not supplied by the assistant.
+  from what they asked about, not supplied by the assistant. A direct answer to a question
+  the assistant just asked does qualify: the assistant supplied the slot, the user supplied
+  the value, and a bare reply carrying only that value ("12:30 pm" after being asked for a
+  birth time) is as much their own assertion as a full sentence would be. What is barred is
+  a value the assistant put into the user's mouth and the user never confirmed.
 - The value is usable as it stands. Canonicalise form only (translate to English, express
   dates and times in standard notation). Never repair, round, complete or substitute a
   value to make it usable, and never fill a field the user left open.

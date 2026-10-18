@@ -79,6 +79,32 @@ def guess_life_areas(message: str) -> list[str]:
     return areas
 
 
+# Unanchored, and deliberately generous: this gate only ever *blocks* a memory_cmd, so a
+# false positive costs nothing while a false negative would swallow a real command.
+_MEMORY_VERB = re.compile(
+    r"\b(remember|note|save|store|forget|delete|remove|erase|"
+    r"yaad\s+rakh\w*|yaad\s+rakho|bhool\s+ja\w*)\b",
+    re.I,
+)
+
+
+def honour_route(route: str, message: str, *, has_history: bool) -> str:
+    """Accept the classifier's route only where the message can actually support it.
+
+    A route is not merely a reply style. `memory_cmd` writes and then acknowledges; it cannot
+    answer anything, so a message misrouted there loses the question the user actually asked.
+    That makes it the one route a classifier must not be trusted with alone: the prompt asks
+    for an explicit remember/forget instruction, and this is what guarantees one is present.
+    A plain statement of fact belongs on `answer` — persisting it is the memory graph's job,
+    not the reply's (§4, §5).
+    """
+    if route == "memory_cmd" and not _MEMORY_VERB.search(message):
+        return "answer"
+    if route == "followup" and not has_history:
+        return "answer"
+    return route
+
+
 def rule_route(message: str, *, has_history: bool) -> str | None:
     """Return a route when a deterministic rule applies, else None (→ LLM)."""
     text = message.strip()

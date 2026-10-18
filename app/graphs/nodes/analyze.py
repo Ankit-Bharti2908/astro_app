@@ -14,6 +14,7 @@ from app.graphs.rules import (
     detect_language,
     explicit_language_request,
     guess_life_areas,
+    honour_route,
     rule_route,
 )
 from app.graphs.state import ChatState
@@ -62,7 +63,7 @@ def make_analyze(deps: Deps):
             )
             areas = [a for a in result.life_areas if a in LIFE_AREAS] or guess_life_areas(message)
             language = explicit or result.explicit_language or result.language
-            route = result.route if (result.route != "followup" or has_history) else "answer"
+            route = honour_route(result.route, message, has_history=has_history)
             return {"route": route, "life_areas": areas, "language": language, "explicit_language": explicit or result.explicit_language}
         except LLMError as exc:
             log.warning("analyze LLM failed, defaulting to answer route: %s", exc)

@@ -238,7 +238,7 @@ LLM nodes carry `RetryPolicy(max_attempts=2)` and a node-level `error_handler` t
   avoids provider-specific forced-tool JSON modes (which newer Anthropic models reject).
 - **Token counting** is a 4-chars-per-token estimate; budgets are enforced on that estimate so no tokenizer download
   is needed. Swap `app/context/tokens.py` for a provider tokenizer if exact accounting matters.
-- **Prompts are XML-structured and versioned** (`app/prompts/templates.py`, `PROMPT_VERSION = "v3"`). Tagged sections
+- **Prompts are XML-structured and versioned** (`app/prompts/templates.py`, `PROMPT_VERSION = "v4"`). Tagged sections
   (`<task>`, `<rules>`, `<examples>`, …) let one rule be revised without disturbing the rest. Prompt text is
   English-only; the reply language is an instruction resolved against the meta layer.
 - **Routing rules live in the prompt, not in code.** `ANALYZE_SYSTEM` draws the line between the user *stating*

@@ -68,8 +68,21 @@ def test_followup_uses_short_term_context_only(client, fake_llm, repo, app):
     assert "recent_turns" in d["context_used"] and not [c for c in d["context_used"] if c.startswith("memory:")]
     # no retrieval calls: only the always-on profile/index load and session bookkeeping
     assert set(repo.calls) <= {"get_user", "memory_index", "upsert_session"}
-    assert len(app.state.container.memory_runs) == runs_before  # memory graph skipped
-    assert fake_llm.calls_for("followup") and not fake_llm.calls_for("extract")[runs_before + 1 :]
+    # The memory graph still runs — a short continuation is where the user supplies the detail
+    # just asked for — but "Why do you say that?" carries nothing durable, so it writes nothing.
+    assert len(app.state.container.memory_runs) == runs_before + 1
+    assert not app.state.container.memory_runs[-1]["result"]["candidates"]
+    assert fake_llm.calls_for("followup")
+
+
+def test_a_bare_fact_is_answered_not_merely_acknowledged(client, app):
+    """Answering the assistant's own question ("dophar 12 bje 30 min") is a statement of fact,
+    not a command. Misrouted to memory_cmd it got a canned "Noted" and the pending question was
+    dropped; the route must be one that can both reply and learn."""
+    d = chat(client, "dophar 12 bje 30 min")
+    assert d["route"] != "memory_cmd"
+    assert d["memory_cmd_result"] is None
+    assert app.state.container.memory_runs  # the fact still reaches the memory graph
 
 
 # 5 ------------------------------------------------------------------------------

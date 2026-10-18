@@ -37,7 +37,13 @@ from app.prompts.templates import PROMPT_VERSION
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-MEMORY_ROUTES = {"answer", "memory_recall"}  # §5: skipped for followup, smalltalk, memory_cmd, ephemeral
+# Which routes feed the memory graph. Routing answers "how should this reply be shaped?",
+# which is a different question from "is there anything here worth learning?" — so the two
+# must not share one decision. `followup` is in: a short continuation is exactly where a user
+# supplies the detail that was just asked for ("dophar 12 baje 30 min"), and leaving it out
+# meant the brain answered the turn and then forgot it. `memory_cmd` writes inline and
+# `smalltalk` carries nothing durable; ephemeral turns never write (§5).
+MEMORY_ROUTES = {"answer", "memory_recall", "followup"}
 UserId = Annotated[str, Path(min_length=1, max_length=128, pattern=ID_PATTERN)]
 
 
