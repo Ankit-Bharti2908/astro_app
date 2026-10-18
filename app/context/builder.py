@@ -50,7 +50,17 @@ def profile_layer(profile: UserProfile | None, budget: int) -> str:  # L1
         f"Sun sign: {profile.zodiac or 'unknown'}",
         f"Preferred language: {profile.preferred_language or 'unknown'}",
     ]
-    return truncate_to_budget("## User profile\n" + " | ".join(rows), budget)
+    # Name the gaps instead of leaving the model to diff six rows for "unknown": re-asking for
+    # a detail already on file is what makes a brain feel like it forgot (§3).
+    missing = [
+        label
+        for label, value in (("date of birth", profile.dob), ("time of birth", profile.tob), ("place of birth", profile.birth_place))
+        if not value
+    ]
+    text = "## User profile\n" + " | ".join(rows)
+    if missing:
+        text += "\nMissing for a chart: " + ", ".join(missing)
+    return truncate_to_budget(text, budget)
 
 
 def index_layer(index: dict[str, dict[str, int]], budget: int) -> str:  # L2

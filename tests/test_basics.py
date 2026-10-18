@@ -13,7 +13,7 @@ from app.brain.models import Memory, MemoryCandidate, UserProfile
 from app.brain.profile_validation import validate_profile_patch
 from app.brain.repository import apply_profile_patch
 from app.brain.scoring import initial_confidence, initial_importance, is_expired, rank_memories
-from app.context.builder import build_context
+from app.context.builder import build_context, profile_layer
 from app.graphs.rules import detect_language, guess_life_areas, rule_route
 from app.llm.provider import LLMMessage, StructuredOutputError, extract_json
 from app.profile.zodiac import sun_sign
@@ -179,3 +179,15 @@ def test_inadmissible_profile_values_are_refused_not_repaired(repo, clock):
 
     profile = apply_profile_patch(UserProfile(user_id="u"), {"tob": "222:8 PM", "dob": "2000-01-01"}, FIXED_NOW)
     assert profile.tob is None and profile.zodiac == "Capricorn"  # the good half still lands
+
+
+def test_profile_layer_names_only_the_gaps():
+    """The model is told which slots are missing rather than left to scan six rows for
+    "unknown" — re-asking for a detail already on file is what makes a brain feel amnesiac."""
+    full = UserProfile(user_id="u", name="Rahul", dob=date(1995, 8, 15), tob="10:08", birth_place="Delhi")
+    assert "Missing for a chart" not in profile_layer(full, 150)
+
+    layer = profile_layer(full.model_copy(update={"tob": None}), 150)
+    assert "Missing for a chart: time of birth" in layer
+    assert "date of birth" not in layer.split("Missing for a chart:")[1]  # never re-ask for Delhi/the DOB
+    assert "place of birth" not in layer.split("Missing for a chart:")[1]
