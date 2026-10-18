@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import uuid
 from datetime import UTC, datetime
 
 import pytest
@@ -10,14 +8,14 @@ from fastapi.testclient import TestClient
 from app.brain.errors import BrainUnavailable
 from app.brain.memory_repo import InMemoryBrainRepository
 from app.config import Settings
-from app.llm.fake import FakeLLM
 from app.main import create_app
+from tests.fake_llm import FakeLLM
 
 FIXED_NOW = datetime(2026, 10, 17, 9, 30, tzinfo=UTC)
 
 
 def make_settings(**overrides) -> Settings:
-    base = dict(brain_backend="memory", llm_backend="fake", default_timezone="Asia/Kolkata")
+    base = dict(brain_backend="memory", default_timezone="Asia/Kolkata")
     base.update(overrides)
     return Settings(_env_file=None, **base)
 
@@ -79,27 +77,3 @@ for _name in (
     "supersede_memory", "mark_deleted", "touch_used", "memory_index", "upsert_session", "get_session", "search_sessions",
 ):
     setattr(FailingRepo, _name, _failing(_name))
-
-
-# ---- optional real Neo4j -------------------------------------------------------
-
-NEO4J_TEST_URI = os.getenv("NEO4J_TEST_URI")
-
-
-@pytest.fixture(params=["memory", pytest.param("neo4j", marks=pytest.mark.neo4j)])
-async def any_repo(request):
-    if request.param == "memory":
-        yield InMemoryBrainRepository()
-        return
-    if not NEO4J_TEST_URI:
-        pytest.skip("NEO4J_TEST_URI not set")
-    from app.brain.neo4j_repo import Neo4jBrainRepository
-
-    repo = Neo4jBrainRepository(NEO4J_TEST_URI, os.getenv("NEO4J_TEST_USER") or None, os.getenv("NEO4J_TEST_PASSWORD") or None)
-    await repo.ensure_schema()
-    yield repo
-    await repo.close()
-
-
-def unique_user() -> str:
-    return f"u-{uuid.uuid4().hex[:8]}"

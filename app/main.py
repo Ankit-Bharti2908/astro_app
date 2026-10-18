@@ -7,9 +7,12 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -36,10 +39,6 @@ def build_repo(settings: Settings) -> BrainRepository:
 
 
 def build_llm(settings: Settings) -> LLMProvider:
-    if settings.llm_backend == "fake":
-        from app.llm.fake import FakeLLM
-
-        return FakeLLM()
     from app.llm.litellm_provider import LiteLLMProvider
 
     return LiteLLMProvider(settings)
@@ -51,6 +50,9 @@ def build_checkpointer(settings: Settings) -> BaseCheckpointSaver:
 
         return AsyncPostgresSaver.from_conn_string(settings.checkpointer_url)  # type: ignore[return-value]
     return InMemorySaver()
+
+
+MAX_MEMORY_RUNS = 50  # the UI's memory-graph trace is a rolling window, not a log
 
 
 @dataclass
@@ -74,6 +76,8 @@ class Container:
             log.exception("memory graph failed for user=%s: %s", payload.get("user_id"), exc)
             self.memory_runs.append({"payload": payload, "error": str(exc)})
             return None
+        finally:
+            del self.memory_runs[:-MAX_MEMORY_RUNS]
 
 
 def build_container(
@@ -125,6 +129,15 @@ def create_app(
     app = FastAPI(title="MyNaksh Shared Brain", version="0.1.0", lifespan=lifespan)
     app.state.container = container
     app.include_router(router)
+
+    # the orchestration console: chat on the left, what the graphs did on the right
+    ui_dir = Path(__file__).parent / "static"
+    app.mount("/ui", StaticFiles(directory=ui_dir, html=True), name="ui")
+
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        return RedirectResponse("/ui/")
+
     return app
 
 

@@ -1,8 +1,7 @@
 """Memory-accuracy eval (§16): storage-decision precision/recall and label accuracy on the labelled set,
 plus a confidence-threshold sweep that validates the 0.6 storage threshold (§7.2).
 
-    python -m eval.run_eval --backend fake            # offline, deterministic
-    python -m eval.run_eval --backend litellm         # real extraction model (needs provider keys)
+    python -m eval.run_eval                          # runs the real extraction model (needs provider keys)
 """
 
 from __future__ import annotations
@@ -20,16 +19,6 @@ HERE = Path(__file__).parent
 NOW = datetime(2026, 10, 17, 9, 30, tzinfo=UTC)
 
 
-def build_llm(backend: str):
-    if backend == "fake":
-        from app.llm.fake import FakeLLM
-
-        return FakeLLM()
-    from app.llm.litellm_provider import LiteLLMProvider
-
-    return LiteLLMProvider(Settings(llm_backend="litellm"))
-
-
 def prf(tp: int, fp: int, fn: int) -> dict:
     p = tp / (tp + fp) if tp + fp else 0.0
     r = tp / (tp + fn) if tp + fn else 0.0
@@ -37,10 +26,12 @@ def prf(tp: int, fp: int, fn: int) -> dict:
     return {"precision": round(p, 3), "recall": round(r, 3), "f1": round(f1, 3), "tp": tp, "fp": fp, "fn": fn}
 
 
-async def run(backend: str, thresholds: list[float]) -> dict:
+async def run(thresholds: list[float]) -> dict:
+    from app.llm.litellm_provider import LiteLLMProvider
+
     items = json.loads((HERE / "labelled_set.json").read_text())
-    llm = build_llm(backend)
-    settings = Settings(_env_file=None, llm_backend=backend)
+    settings = Settings()
+    llm = LiteLLMProvider(settings)
     rows = []
     for item in items:
         try:
@@ -86,7 +77,7 @@ async def run(backend: str, thresholds: list[float]) -> dict:
     label_acc = {k: round(label_hits[k] / label_total[k], 3) if label_total[k] else None for k in label_total}
 
     report = {
-        "backend": backend,
+        "backend": settings.small_model,
         "items": len(items),
         "storage_decision_by_threshold": sweep,
         "default_threshold": "0.6",
@@ -96,17 +87,16 @@ async def run(backend: str, thresholds: list[float]) -> dict:
     }
     out_dir = HERE / "results"
     out_dir.mkdir(exist_ok=True)
-    (out_dir / f"latest_{backend}.json").write_text(json.dumps(report, indent=2, default=str))
+    (out_dir / "latest.json").write_text(json.dumps(report, indent=2, default=str))
     return report
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--backend", choices=["fake", "litellm"], default="fake")
     ap.add_argument("--thresholds", default="0.3,0.5,0.6,0.7,0.9")
     args = ap.parse_args()
-    report = asyncio.run(run(args.backend, [float(t) for t in args.thresholds.split(",")]))
-    print(f"backend={report['backend']} items={report['items']}")
+    report = asyncio.run(run([float(t) for t in args.thresholds.split(",")]))
+    print(f"model={report['backend']} items={report['items']}")
     print("threshold  precision  recall  f1     tp fp fn tn")
     for th, m in report["storage_decision_by_threshold"].items():
         print(f"{th:>9}  {m['precision']:9.3f}  {m['recall']:6.3f}  {m['f1']:5.3f}  {m['tp']:2d} {m['fp']:2d} {m['fn']:2d} {m['tn']:2d}")

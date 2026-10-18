@@ -12,6 +12,7 @@ from litellm import Router
 
 from app.config import Settings
 from app.llm.provider import (
+    STRUCTURED_TASKS,
     TASK_TIERS,
     BaseLLMProvider,
     LLMMessage,
@@ -129,6 +130,11 @@ class LiteLLMProvider(BaseLLMProvider):
         tier = TASK_TIERS.get(task, "strong")
         return self.settings.llm_max_tokens_answer if tier == "strong" else self.settings.llm_max_tokens_small
 
+    def _temperature(self, task: str) -> float:
+        if task in STRUCTURED_TASKS:
+            return self.settings.llm_temperature_structured
+        return self.settings.llm_temperature_reply
+
     async def complete(
         self,
         task: str,
@@ -142,6 +148,7 @@ class LiteLLMProvider(BaseLLMProvider):
             "model": group,
             "messages": to_openai_messages(messages),
             "max_tokens": max_tokens or self._max_tokens(task),
+            "temperature": self._temperature(task),
             "metadata": {"task": task},
         }
         oa_tools = to_openai_tools(tools)

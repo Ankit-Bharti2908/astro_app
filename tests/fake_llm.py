@@ -1,4 +1,4 @@
-"""FakeLLM: deterministic, scriptable provider used by the test-suite and `LLM_BACKEND=fake`.
+"""FakeLLM: deterministic, scriptable LLMProvider used by the test-suite.
 
 Default behaviour per task is rule-based so the §13 walkthrough runs end-to-end with no API key.
 Tests can override any call with `script(task, response)` (FIFO per task) or force failures.
@@ -105,7 +105,7 @@ class FakeLLM(BaseLLMProvider):
         return handler(system, user, messages)
 
     def _analyze(self, system: str, user: str, messages) -> LLMResponse:
-        m = re.search(r"^Message: (.*)\Z", user, flags=re.S | re.M)
+        m = re.search(r"<message>\s*(.*?)\s*</message>", user, flags=re.S)
         message = m.group(1).strip() if m else user
         areas = guess_life_areas(message) or ["general"]
         payload = {
@@ -119,15 +119,15 @@ class FakeLLM(BaseLLMProvider):
 
     def _extract(self, system: str, user: str, messages) -> LLMResponse:
         today = _current_date(system) or date.today()
-        quoted = re.search(r'"""(.*?)"""', user, flags=re.S)
+        quoted = re.search(r"<user_message>\s*(.*?)\s*</user_message>", user, flags=re.S)
         message = quoted.group(1) if quoted else user
         ctx = re.search(r"^assistant: (.*)$", user, flags=re.M)
         context = ctx.group(1) if ctx else ""
         return LLMResponse(content=json.dumps({"candidates": rule_extract(message, today, context=context)}, default=str))
 
     def _reconcile(self, system: str, user: str, messages) -> LLMResponse:
-        existing = _json_block(user, "EXISTING MEMORIES") or []
-        candidate = _json_block(user, "NEW CANDIDATE") or {}
+        existing = _xml_json(user, "existing_memories") or []
+        candidate = _xml_json(user, "new_candidate") or {}
         decision = {"action": "ADD", "target_memory_id": None, "merged_attributes": None, "reason": "fake"}
         for mem in existing:
             if mem.get("key") != candidate.get("key"):
@@ -151,7 +151,7 @@ class FakeLLM(BaseLLMProvider):
     def _summarize(self, system: str, user: str, messages) -> LLMResponse:
         turns = re.findall(r"^(?:user|assistant): (.+)$", user, flags=re.M)
         gist = "; ".join(t[:60] for t in turns)[:400]
-        prev = re.search(r"PREVIOUS SUMMARY:\n(.+?)\n\n", user, flags=re.S)
+        prev = re.search(r"<previous_summary>\s*(.*?)\s*</previous_summary>", user, flags=re.S)
         prefix = (prev.group(1).strip() + " ") if prev and prev.group(1).strip() not in ("", "(none)") else ""
         return LLMResponse(content=f"{prefix}Summary: {gist}".strip())
 
@@ -230,8 +230,9 @@ def _greeting(lang: str, name: str | None) -> str:
     return {"hi": f"नमस्ते{who}!", "hinglish": f"Namaste{who}!"}.get(lang, f"Hello{who}!")
 
 
-def _json_block(text: str, label: str) -> Any:
-    m = re.search(rf"{label}[^\n]*:\n(.+?)(?:\n\n|\Z)", text, flags=re.S)
+def _xml_json(text: str, tag: str) -> Any:
+    """Read the JSON payload of an XML block in a prompt, e.g. <existing_memories>[...]."""
+    m = re.search(rf"<{tag}>\s*(.*?)\s*</{tag}>", text, flags=re.S)
     if not m:
         return None
     try:

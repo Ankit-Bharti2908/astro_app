@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared Brain Console</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #151a21; --panel-2: #1b2028; --line: #262d38;
+    --text: #e6e9ee; --muted: #8e99a8; --accent: #7aa2f7; --good: #7bd88f;
+    --warn: #e0af68; --bad: #f7768e; --mem: #bb9af7; --tool: #7dcfff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { overflow: hidden; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  header .spacer { flex: 1; }
+  label.field { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  input[type=text] {
+    background: var(--bg); border: 1px solid var(--line); color: var(--text);
+    border-radius: 6px; padding: 5px 8px; font: 12px var(--mono); width: 130px;
+  }
+  input:focus, textarea:focus { outline: 1px solid var(--accent); }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: #0b0f14; border-color: var(--accent); font-weight: 600; }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 460px; height: calc(100vh - 49px); }
+  section { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  #inspector { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
+
+  #log { flex: 1; min-height: 0; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 76%; }
+  .msg.user { align-self: flex-end; }
+  .bubble { padding: 10px 13px; border-radius: 12px; white-space: pre-wrap; word-wrap: break-word; }
+  .user .bubble { background: var(--accent); color: #0b0f14; border-bottom-right-radius: 4px; }
+  .bot .bubble { background: var(--panel-2); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .bot.selected .bubble { border-color: var(--accent); }
+  .msg.bot { cursor: pointer; }
+  .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .empty { color: var(--muted); margin: auto; text-align: center; max-width: 420px; }
+  .empty code { color: var(--accent); }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--bg); font: 11px var(--mono); color: var(--muted);
+  }
+  .chip.route { color: var(--accent); border-color: #2c3b57; }
+  .chip.mem { color: var(--mem); border-color: #3a2f55; }
+  .chip.tool { color: var(--tool); border-color: #24455a; }
+  .chip.good { color: var(--good); border-color: #2a4a35; }
+  .chip.warn { color: var(--warn); border-color: #4d3c20; }
+  .chip.bad { color: var(--bad); border-color: #5a2733; }
+
+  #composer { border-top: 1px solid var(--line); padding: 12px 16px; display: flex; gap: 10px; align-items: flex-end; }
+  textarea {
+    flex: 1; resize: none; background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 10px 12px; font: 14px inherit; min-height: 44px; max-height: 140px;
+  }
+  .presets { padding: 0 16px 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .presets button { font-size: 11px; color: var(--muted); }
+
+  .panel { border-bottom: 1px solid var(--line); padding: 14px 16px; }
+  .panel h2 {
+    font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .panel h2 .count { color: var(--text); font-weight: 400; }
+  .hint { color: var(--muted); font-size: 12px; }
+
+  .bar { display: flex; align-items: center; gap: 8px; margin: 3px 0; font: 11px var(--mono); }
+  .bar .name { width: 70px; color: var(--muted); }
+  .bar .track { flex: 1; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+  .bar .fill { height: 100%; background: var(--accent); opacity: .75; }
+  .bar .num { width: 62px; text-align: right; color: var(--muted); }
+
+  .card { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; }
+  .card .head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+  .card .name { font: 600 12px var(--mono); }
+  .card pre {
+    margin: 6px 0 0; padding: 7px 9px; background: var(--panel-2); border-radius: 6px;
+    font: 11px/1.5 var(--mono); color: var(--muted); white-space: pre-wrap; word-break: break-word;
+    max-height: 150px; overflow: auto;
+  }
+  .stage { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; border-top: 1px dashed var(--line); }
+  .stage:first-of-type { border-top: 0; }
+  .stage .label { width: 78px; flex: none; font: 11px var(--mono); color: var(--muted); }
+  .stage .body { flex: 1; min-width: 0; font-size: 12px; }
+  .kv { font: 11px var(--mono); color: var(--muted); }
+  .val { color: var(--text); }
+  .spin { display: inline-block; width: 9px; height: 9px; border: 2px solid var(--line);
+          border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 1000px) {
+    html, body { overflow: auto; height: auto; }
+    main { grid-template-columns: 1fr; height: auto; }
+    #inspector { border-left: 0; border-top: 1px solid var(--line); }
+    #log { max-height: 60vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔮 Shared Brain Console</h1>
+  <label class="field">user <input type="text" id="userId" value="rahul"></label>
+  <label class="field">session <input type="text" id="sessionId" value="s1"></label>
+  <button id="newSession" title="Start a new session: short-term memory resets, the brain persists">new session</button>
+  <label class="field" title="Read the brain, write nothing"><input type="checkbox" id="ephemeral"> ephemeral</label>
+  <span class="spacer"></span>
+  <span id="health" class="chip">connecting…</span>
+</header>
+
+<main>
+  <section>
+    <div id="log"><div class="empty">
+      Chat with the astrologer on the left; every turn's routing, context layers, tool calls and
+      memory-graph decisions appear on the right.<br><br>
+      Click any past reply to re-inspect that turn.
+    </div></div>
+    <div class="presets" id="presets"></div>
+    <div id="composer">
+      <textarea id="input" rows="1" placeholder="Ask about your career, marriage, health…  (⏎ to send)"></textarea>
+      <button class="primary" id="send">Send</button>
+    </div>
+  </section>
+
+  <section id="inspector">
+    <div class="panel">
+      <h2>Response graph <span class="count" id="routeSummary"></span></h2>
+      <div id="routePanel" class="hint">No turn selected yet.</div>
+    </div>
+    <div class="panel">
+      <h2>Context assembled <span class="count" id="ctxSummary"></span></h2>
+      <div id="ctxPanel" class="hint">—</div>
+    </div>
+    <div class="panel">
+      <h2>Agent tools <span class="count" id="toolSummary"></span></h2>
+      <div id="toolPanel" class="hint">—</div>
+    </div>
+    <div class="panel">
+      <h2>Memory graph <span class="count" id="memSummary"></span></h2>
+      <div id="memPanel" class="hint">—</div>
+    </div>
+    <div class="panel">
+      <h2>Shared brain <span class="count" id="brainSummary"></span></h2>
+      <div id="brainPanel" class="hint">—</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+const chip = (text, cls = "") => `<span class="chip ${cls}">${esc(text)}</span>`;
+
+const PRESETS = [
+  "My name is Rahul, born 15 August 1995 in Delhi. Planning to switch jobs next year.",
+  "What should I focus on for my career?",
+  "Why do you say that?",
+  "What do you remember about my career goals?",
+  "Actually I've changed my mind — I want to start my own business instead.",
+  "Remember that I love classical music",
+  "Meri shaadi kab hogi?",
+];
+
+// Routes that hand the turn to the memory graph (the API skips the rest).
+const MEMORY_ROUTES = ["answer", "memory_recall"];
+
+const turns = [];
+let selected = -1;
+let lastSeq = 0;      // highest memory-run seq already pulled
+let sending = false;
+
+/* ---------- transport ---------- */
+const api = async (path, options) => {
+  const res = await fetch(path, options);
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return res.status === 204 ? null : res.json();
+};
+
+async function loadHealth() {
+  try {
+    const h = await api("/health");
+    const model = h.llm.models ? Object.values(h.llm.models)[0] : h.llm.backend;
+    $("health").className = "chip " + (h.status === "ok" ? "good" : "warn");
+    $("health").textContent = `${h.status} · brain:${h.brain.backend} · ${model} · prompts:${h.prompt_version}`;
+  } catch {
+    $("health").className = "chip bad";
+    $("health").textContent = "api unreachable";
+  }
+}
+
+/* ---------- chat ---------- */
+async function send(text) {
+  if (!text.trim() || sending) return;
+  sending = true; $("send").disabled = true;
+  const user_id = $("userId").value.trim() || "rahul";
+  const session_id = $("sessionId").value.trim() || "s1";
+  const ephemeral = $("ephemeral").checked;
+
+  addBubble("user", text);
+  const turn = { text, user_id, session_id, ephemeral, reply: null, memRun: null, memState: "pending" };
+  turns.push(turn);
+  const idx = turns.length - 1;
+  const node = addBubble("bot", "…", idx);
+
+  try {
+    turn.reply = await api("/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ user_id, session_id, message: text, ephemeral }),
+    });
+    node.querySelector(".bubble").textContent = turn.reply.response;
+    node.querySelector(".meta").innerHTML = metaChips(turn.reply);
+    $("log").scrollTop = $("log").scrollHeight;  // the reply just changed the height
+    if (ephemeral) turn.memState = "skipped-ephemeral";
+    else if (!MEMORY_ROUTES.includes(turn.reply.route)) turn.memState = "skipped-route";
+    select(idx);
+    if (turn.memState === "pending") pollMemoryRun(idx);
+    refreshBrain();
+  } catch (err) {
+    node.querySelector(".bubble").textContent = "request failed: " + err.message;
+    node.querySelector(".bubble").style.color = "var(--bad)";
+  } finally {
+    sending = false; $("send").disabled = false; $("input").focus();
+  }
+}
+
+function metaChips(r) {
+  const total = Object.values(r.context_tokens || {}).reduce((a, b) => a + b, 0);
+  return [
+    chip(r.route, "route"),
+    chip(r.language),
+    chip(`${total} ctx tokens`),
+    ...(r.tools_used || []).map((t) => chip(t.name, "tool")),
+    ...(r.degraded || []).map((d) => chip(d, "bad")),
+  ].join("");
+}
+
+function addBubble(who, text, idx) {
+  $("log").querySelector(".empty")?.remove();
+  const el = document.createElement("div");
+  el.className = `msg ${who}`;
+  el.innerHTML = `<div class="bubble"></div>${who === "bot" ? '<div class="meta"></div>' : ""}`;
+  el.querySelector(".bubble").textContent = text;
+  if (who === "bot") { el.dataset.idx = idx; el.onclick = () => select(idx); }
+  $("log").append(el);
+  $("log").scrollTop = $("log").scrollHeight;
+  return el;
+}
+
+/* ---------- memory graph trace (runs in the background, so poll for it) ---------- */
+async function pollMemoryRun(idx) {
+  const turn = turns[idx];
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await new Promise((r) => setTimeout(r, 600));
+    let runs = [];
+    try {
+      runs = await api(`/users/${encodeURIComponent(turn.user_id)}/memory-runs` +
+                       `?session_id=${encodeURIComponent(turn.session_id)}&since=${lastSeq}`);
+    } catch { continue; }
+    for (const run of runs) {
+      lastSeq = Math.max(lastSeq, run.seq);
+      const target = turns.find((t) => t.memState === "pending" && t.text === run.message);
+      if (target) { target.memRun = run; target.memState = "done"; }
+    }
+    if (turn.memState === "done") break;
+  }
+  if (turn.memState === "pending") turn.memState = "timeout";
+  if (selected === idx) render();
+  refreshBrain();
+}
+
+/* ---------- inspector ---------- */
+function select(idx) {
+  selected = idx;
+  document.querySelectorAll(".msg.bot").forEach((el) =>
+    el.classList.toggle("selected", Number(el.dataset.idx) === idx));
+  render();
+}
+
+function render() {
+  const turn = turns[selected];
+  if (!turn || !turn.reply) return;
+  const r = turn.reply;
+
+  // 1. routing
+  $("routeSummary").textContent = r.route;
+  $("routePanel").innerHTML = `
+    <div class="stage"><div class="label">route</div><div class="body">
+      ${chip(r.route, "route")} <span class="hint">${esc(ROUTE_NOTES[r.route] || "")}</span></div></div>
+    <div class="stage"><div class="label">language</div><div class="body">${chip(r.language)}</div></div>
+    <div class="stage"><div class="label">degraded</div><div class="body">${
+      r.degraded.length ? r.degraded.map((d) => chip(d, "bad")).join(" ") : '<span class="hint">none</span>'}</div></div>
+    ${r.memory_cmd_result ? `<div class="stage"><div class="label">memory cmd</div>
+      <div class="body"><pre>${esc(JSON.stringify(r.memory_cmd_result, null, 2))}</pre></div></div>` : ""}`;
+
+  // 2. context layers
+  const tokens = r.context_tokens || {};
+  const total = Object.values(tokens).reduce((a, b) => a + b, 0);
+  const max = Math.max(1, ...Object.values(tokens));
+  $("ctxSummary").textContent = `${total} tokens`;
+  $("ctxPanel").innerHTML =
+    Object.entries(tokens).map(([name, n]) => `
+      <div class="bar"><div class="name">${esc(name)}</div>
+        <div class="track"><div class="fill" style="width:${(n / max) * 100}%"></div></div>
+        <div class="num">${n}</div></div>`).join("") +
+    `<div style="margin-top:9px">${
+      r.context_used.length
+        ? r.context_used.map((c) => chip(c, c.startsWith("memory:") ? "mem" : "")).join(" ")
+        : '<span class="hint">nothing retrieved — cold start</span>'}</div>`;
+
+  // 3. tools
+  const tools = r.tools_used || [];
+  $("toolSummary").textContent = tools.length ? `${tools.length} call${tools.length > 1 ? "s" : ""}` : "";
+  $("toolPanel").innerHTML = tools.length
+    ? tools.map((t) => `
+        <div class="card">
+          <div class="head">${chip(t.name, "tool")}<span class="kv">${esc(JSON.stringify(t.args))}</span></div>
+          <pre>${esc(t.result) || "<em>empty</em>"}</pre>
+        </div>`).join("")
+    : `<div class="hint">The agent answered from the pre-loaded context — no tool round needed.</div>`;
+
+  // 4. memory graph
+  $("memPanel").innerHTML = memoryPanel(turn);
+  const run = turn.memRun;
+  $("memSummary").textContent = run ? `${(run.written || []).length} written` :
+    turn.memState === "pending" ? "running…" : "skipped";
+}
+
+const ROUTE_NOTES = {
+  answer: "full context + agent tools, then the memory graph",
+  followup: "short-term context only — no brain read, no write",
+  memory_recall: "answers from stored memories",
+  memory_cmd: "explicit remember / forget",
+  smalltalk: "profile only, no memory retrieval",
+};
+
+const ACTION_CLASS = { ADD: "good", UPDATE: "warn", SUPERSEDE: "mem", PROFILE: "tool", NOOP: "", SKIP: "" };
+
+function memoryPanel(turn) {
+  if (turn.memState === "skipped-ephemeral")
+    return `<div class="hint">Ephemeral turn: the brain was read but the memory graph never ran.</div>`;
+  if (turn.memState === "skipped-route")
+    return `<div class="hint">Route <code>${esc(turn.reply.route)}</code> does not write memories (§5).</div>`;
+  if (turn.memState === "pending")
+    return `<div class="hint"><span class="spin"></span> extract → score → filter → reconcile → write …</div>`;
+  if (turn.memState === "timeout")
+    return `<div class="hint">No memory run reported for this turn.</div>`;
+
+  const run = turn.memRun;
+  if (run.error) return `<div class="hint" style="color:var(--bad)">memory graph failed: ${esc(run.error)}</div>`;
+  if (run.skipped_reason) return `<div class="hint">skipped: ${esc(run.skipped_reason)}</div>`;
+
+  const cand = (c) => `${esc(c.type)}:<span class="val">${esc(c.key)}</span> = ${esc(c.value)}`;
+  const stage = (label, body) => `<div class="stage"><div class="label">${label}</div><div class="body">${body}</div></div>`;
+  const none = '<span class="hint">none</span>';
+
+  return [
+    stage("extract", run.candidates.length
+      ? run.candidates.map((c) => `<div class="kv">${cand(c)} ${chip(c.certainty)}</div>`).join("")
+      : none),
+    stage("filter", [
+      run.accepted.map((c) => `<div class="kv">${chip("kept", "good")} ${cand(c)} <span class="hint">conf ${c.confidence?.toFixed?.(2) ?? "—"}</span></div>`).join(""),
+      run.dropped.map((c) => `<div class="kv">${chip("dropped", "bad")} ${cand(c)} <span class="hint">${esc(c.drop_reason || c.reason || "")}</span></div>`).join(""),
+    ].join("") || none),
+    stage("reconcile", run.decisions.length
+      ? run.decisions.map((d) => `<div class="kv">${chip(d.action, ACTION_CLASS[d.action] ?? "")}
+          ${esc(d.candidate?.key || "")} <span class="hint">${esc(d.reason || "")}</span></div>`).join("")
+      : none),
+    stage("write", run.written.length
+      ? run.written.map((w) => `<div class="kv">${chip(w.action, ACTION_CLASS[w.action] ?? "")}
+          <span class="val">${esc(w.key || "")}</span>
+          <span class="hint">${esc(w.value || "")}${w.reason ? " — " + esc(w.reason) : ""}</span></div>`).join("")
+      : none),
+    run.degraded?.length ? stage("degraded", run.degraded.map((d) => chip(d, "bad")).join(" ")) : "",
+  ].join("");
+}
+
+/* ---------- brain state ---------- */
+async function refreshBrain() {
+  const user_id = $("userId").value.trim() || "rahul";
+  try {
+    const mems = await api(`/users/${encodeURIComponent(user_id)}/memories?status=all`);
+    const active = mems.filter((m) => m.status === "active");
+    $("brainSummary").textContent = `${active.length} active / ${mems.length} total`;
+    $("brainPanel").innerHTML = mems.length
+      ? mems.map((m) => `
+          <div class="card" style="${m.status === "active" ? "" : "opacity:.55"}">
+            <div class="head">
+              ${chip(m.key, "mem")}${chip(m.life_area)}${chip(m.type)}
+              ${m.status === "active" ? "" : chip(m.status, "warn")}
+            </div>
+            <div>${esc(m.value)}</div>
+            <div class="kv" style="margin-top:4px">
+              conf ${m.confidence.toFixed(2)} · imp ${m.importance.toFixed(2)} · score ${m.retrieval_score.toFixed(3)}
+              ${m.valid_until ? " · until " + esc(m.valid_until) : ""}
+              ${m.supersedes ? " · supersedes " + esc(m.supersedes.slice(0, 8)) : ""}
+            </div>
+          </div>`).join("")
+      : `<div class="hint">Nothing stored for <code>${esc(user_id)}</code> yet.</div>`;
+  } catch (err) {
+    $("brainPanel").innerHTML = `<div class="hint" style="color:var(--bad)">${esc(err.message)}</div>`;
+  }
+}
+
+/* ---------- wiring ---------- */
+$("send").onclick = () => { const v = $("input").value; $("input").value = ""; send(v); };
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("send").click(); }
+});
+$("input").addEventListener("input", (e) => {
+  e.target.style.height = "auto";
+  e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
+});
+$("newSession").onclick = () => {
+  $("sessionId").value = "s" + Math.floor(Date.now() / 1000 % 100000);
+  addBubble("bot", `— new session ${$("sessionId").value}: short-term memory cleared, the brain persists —`).
+    classList.add("hint");
+};
+$("userId").onchange = refreshBrain;
+$("presets").innerHTML = PRESETS.map((p, i) =>
+  `<button data-i="${i}">${esc(p.length > 46 ? p.slice(0, 44) + "…" : p)}</button>`).join("");
+$("presets").onclick = (e) => {
+  const i = e.target.dataset?.i;
+  if (i !== undefined) { $("input").value = PRESETS[i]; $("input").focus(); }
+};
+
+loadHealth();
+refreshBrain();
+</script>
+</body>
+</html>

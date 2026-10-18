@@ -309,7 +309,7 @@ Using a memory resets `last_used_at`, so memories that keep proving useful stay 
 
 ### 7.5 Conflict resolution (`reconcile`)
 
-Rules first, LLM only for multi-valued ambiguity.
+Rules first, LLM for multi-valued ambiguity and cross-key conflicts.
 
 | Cardinality | Examples | On a new value with the same `key` |
 |---|---|---|
@@ -324,6 +324,11 @@ Rules first, LLM only for multi-valued ambiguity.
 | **NOOP** | Duplicate |
 
 - **Source priority:** explicit correction > direct statement > earlier statement.
+- **Cross-key conflicts:** a correction often arrives under a *different* key — "start my own business **instead of**
+  switching jobs" extracts as `start_own_business`, which collides with nothing. So beyond the same-`key` matches,
+  reconcile also offers the model recent active `goal`/`life_event` memories **in the same life area** (capped at 5).
+  Without this the conflicting goal is never shown to the model and both goals stay active. Preferences and interests
+  are excluded: one rarely cancels another.
 - **Never delete:** superseded memories keep `status: superseded` with a `SUPERSEDES` link from the replacement.
 - Profile corrections (e.g. DOB) also recompute derived attributes such as the zodiac sign.
 
@@ -350,6 +355,11 @@ LiteLLM Router, configured per task:
 
 **Fallback chain:** primary (with timeout) → fallback provider → canned reply with `degraded: ["llm_unavailable"]`.
 
+**Sampling temperature** is set per task, not per model: `analyze`, `extract`, `reconcile` and summarization run at
+`LLM_TEMPERATURE_STRUCTURED` (0.0) because they return decisions, not prose — at a provider default of 1.0 the same
+message routes differently between runs and the same correction sometimes `ADD`s and sometimes `SUPERSEDE`s. Replies
+run at `LLM_TEMPERATURE_REPLY` (0.4).
+
 **Structured output failures:** retry once with the validation error in the prompt, then skip — no memory write in the memory graph, default `answer` route in the response graph.
 
 All LLM nodes carry a LangGraph `RetryPolicy(max_attempts=2)`; the graph has a `recursion_limit` to bound the agent loop.
@@ -365,6 +375,11 @@ All LLM nodes carry a LangGraph `RetryPolicy(max_attempts=2)`; the graph has a `
 
 - Language detection runs inside `analyze` (LLM label: `en` / `hi` / `hinglish`).
 - **Memories are stored in canonical English** regardless of input language; responses are generated in the target language.
+- **Prompt text is English only**, whatever the user writes. The reply language is an instruction (`<language>` in
+  `SYSTEM_BASE`) resolved against the `Reply language` field of the L0 meta layer, not a translated prompt — one
+  prompt to maintain instead of three, and no drift between language variants.
+- **Canned fallbacks are English too** (`CANNED_LLM_UNAVAILABLE`, `RECALL_EMPTY`, the `MEMORY_*` confirmations).
+  They fire precisely when no model is reachable, so nothing is available to translate them at that moment.
 
 ---
 
@@ -456,10 +471,11 @@ app/
 │   └── scoring.py           # confidence, importance, decay, retrieval score
 ├── llm/
 │   ├── provider.py          # LLMProvider protocol, LiteLLM router config
-│   └── fake.py              # FakeLLM for tests
+│   └── litellm_provider.py  # the one real backend
 ├── context/builder.py       # layer assembly + token budgets
 ├── profile/zodiac.py        # sun sign stub
 ├── prompts/                 # versioned prompt templates
+├── static/index.html        # orchestration console served at /ui
 └── config.py
 tests/
 eval/                        # labelled set + extraction/storage metrics script
@@ -471,7 +487,8 @@ demo.http                    # replays the walkthrough
 
 ## 15. Testing
 
-All tests run with `FakeLLM`, the in-memory brain repository and `MemorySaver` — no API key or Neo4j required.
+All tests run with `tests/fake_llm.py` (a scripted `LLMProvider`), the in-memory brain repository and
+`MemorySaver` — no API key or Neo4j required.
 
 | # | Scenario | Assert |
 |---|---|---|

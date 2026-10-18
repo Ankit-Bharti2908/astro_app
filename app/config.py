@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     neo4j_database: str = "neo4j"
 
     # LLM
-    llm_backend: Literal["litellm", "fake"] = "litellm"
     strong_model: str = "anthropic/claude-opus-5-5"
     small_model: str = "anthropic/claude-haiku-5-5"
     fallback_model: str = ""
@@ -28,6 +27,10 @@ class Settings(BaseSettings):
     llm_json_mode: bool = False  # ask providers for native JSON mode when they support it
     llm_max_tokens_answer: int = 1024
     llm_max_tokens_small: int = 800
+    # Routing, extraction and reconciliation are decisions, not prose: sample them at 0 so the
+    # same message always classifies the same way. Replies keep a little warmth.
+    llm_temperature_structured: float = 0.0
+    llm_temperature_reply: float = 0.4
 
     # Short-term memory
     checkpointer: Literal["memory", "postgres"] = "memory"

@@ -26,6 +26,12 @@ TASK_TIERS: dict[str, str] = {
     "followup": "strong",
 }
 
+# Tasks that return a decision or a JSON record rather than prose. These are sampled at
+# `llm_temperature_structured` (0 by default) so routing and reconciliation are reproducible:
+# at the provider default of 1.0 the same correction would sometimes ADD and sometimes
+# SUPERSEDE, and the same opening message would sometimes misroute.
+STRUCTURED_TASKS: frozenset[str] = frozenset({"analyze", "extract", "reconcile", "summarize"})
+
 Role = Literal["system", "user", "assistant", "tool"]
 
 

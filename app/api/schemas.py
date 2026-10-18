@@ -73,6 +73,14 @@ class ChatRequest(BaseModel):
     sync_memory: bool = Field(default=False, description="debug aid: run the memory graph before responding")
 
 
+class ToolCallOut(BaseModel):
+    """One agent tool call made while answering this turn (§4)."""
+
+    name: str
+    args: dict[str, Any]
+    result: str
+
+
 class ChatResponse(BaseModel):
     response: str
     user_id: str
@@ -82,6 +90,7 @@ class ChatResponse(BaseModel):
     context_used: list[str]
     context_tokens: dict[str, int]
     degraded: list[str]
+    tools_used: list[ToolCallOut] = []
     memory_cmd_result: dict[str, Any] | None = None
 
 
@@ -90,3 +99,20 @@ class HealthOut(BaseModel):
     brain: dict[str, Any]
     llm: dict[str, Any]
     prompt_version: str
+
+
+class MemoryRunOut(BaseModel):
+    """One background memory-graph run: what the pipeline made of a turn (§5, §7)."""
+
+    seq: int
+    user_id: str
+    session_id: str
+    message: str
+    candidates: list[dict[str, Any]] = []
+    accepted: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    decisions: list[dict[str, Any]] = []
+    written: list[dict[str, Any]] = []
+    degraded: list[str] = []
+    skipped_reason: str | None = None
+    error: str | None = None

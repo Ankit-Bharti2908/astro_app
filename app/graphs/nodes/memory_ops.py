@@ -24,6 +24,7 @@ from app.brain.scoring import initial_confidence, initial_importance, reinforce
 from app.config import Settings
 from app.llm.provider import LLMMessage, LLMProvider
 from app.prompts.templates import (
+    EXTRACT_REMEMBER_HINT,
     EXTRACT_SYSTEM,
     EXTRACT_USER,
     PROMPT_VERSION,
@@ -75,7 +76,7 @@ async def extract_candidates(
         next_year=local.year + 1,
         this_year=local.year,
     )
-    hint = " (the user explicitly asked you to remember this)" if user_asked else ""
+    hint = EXTRACT_REMEMBER_HINT if user_asked else ""
     result = await llm.structured(
         "extract",
         [LLMMessage("system", system), LLMMessage("user", EXTRACT_USER.format(message=message, remember_hint=hint, context=(context or "(none)")[:600]))],
@@ -171,13 +172,17 @@ def build_memory(user_id: str, c: ScoredCandidate, *, session_id: str | None, no
 
 _CERTAINTY_RANK = {"hypothetical": 0, "hedged": 1, "explicit": 2}
 
+# Types a later statement can retire; a preference or interest rarely cancels another one.
+_CONFLICTABLE_TYPES = ("goal", "life_event")
+_MAX_RELATED_FOR_RECONCILE = 5
+
 
 def _existing_json(mems: list[Memory]) -> str:
     return json.dumps(
         [
             {
                 "id": m.id, "type": m.type, "key": m.key, "value": m.value,
-                "attributes": m.attributes,
+                "attributes": m.attributes, "life_area": m.life_area,
                 "certainty": m.certainty, "created_at": m.created_at.date().isoformat(),
             }
             for m in mems
@@ -189,7 +194,7 @@ def _existing_json(mems: list[Memory]) -> str:
 def _candidate_json(c: ScoredCandidate) -> str:
     return json.dumps(
         {"type": c.type, "key": c.key, "value": c.value, "attributes": c.attributes, "certainty": c.certainty,
-         "temporality": c.temporality, "valid_until": c.valid_until},
+         "life_area": c.life_area, "temporality": c.temporality, "valid_until": c.valid_until},
         default=str,
     )
 
@@ -197,24 +202,39 @@ def _candidate_json(c: ScoredCandidate) -> str:
 async def reconcile_candidate(
     llm: LLMProvider, repo: BrainRepository, *, user_id: str, candidate: ScoredCandidate
 ) -> dict[str, Any]:
-    """Rules first; the LLM only arbitrates multi-valued ambiguity (§7.5)."""
+    """Rules first; the LLM arbitrates multi-valued ambiguity and cross-key conflicts (§7.5)."""
     if candidate.type == "profile_fact" and candidate.key in PROFILE_KEYS:
         return {"action": "PROFILE", "target_memory_id": None, "reason": "profile slot"}
 
-    existing = await repo.list_memories(user_id, keys=[candidate.key], statuses=("active",))
-    if not existing:
-        return {"action": "ADD", "target_memory_id": None, "reason": "no existing memory with this key"}
+    same_key = await repo.list_memories(user_id, keys=[candidate.key], statuses=("active",))
 
     def same(m: Memory) -> bool:
         return m.value.strip().lower() == candidate.value.strip().lower() and m.attributes == candidate.attributes
 
-    for m in existing:
+    # deterministic rules apply within the slot only (§7.5)
+    for m in same_key:
         if same(m):
             return {"action": "NOOP", "target_memory_id": m.id, "reason": "duplicate → reinforce"}
 
-    if candidate.cardinality() == "single":
-        latest = max(existing, key=lambda m: m.created_at)
+    if same_key and candidate.cardinality() == "single":
+        latest = max(same_key, key=lambda m: m.created_at)
         return {"action": "SUPERSEDE", "target_memory_id": latest.id, "reason": "single-valued slot changed"}
+
+    # A correction often arrives under a *different* key ("start_own_business" replacing
+    # "career_change"), so the LLM also sees recent same-life-area memories of a type that
+    # can be retired. Without this the conflict is invisible and we always ADD.
+    existing = list(same_key)
+    if candidate.type in _CONFLICTABLE_TYPES and candidate.life_area != "general":
+        related = await repo.list_memories(
+            user_id, life_areas=[candidate.life_area], statuses=("active",)
+        )
+        seen = {m.id for m in existing}
+        extra = [m for m in related if m.id not in seen and m.type in _CONFLICTABLE_TYPES]
+        extra.sort(key=lambda m: m.created_at, reverse=True)
+        existing += extra[:_MAX_RELATED_FOR_RECONCILE]
+
+    if not existing:
+        return {"action": "ADD", "target_memory_id": None, "reason": "no existing memory to reconcile against"}
 
     try:
         decision = await llm.structured(

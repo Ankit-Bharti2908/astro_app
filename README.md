@@ -15,18 +15,18 @@ POST /chat ──► response graph (reads brain) ──► reply
 
 ## Quick start
 
-### 1. No keys, no database (deterministic fake LLM + in-memory brain)
+### 1. Tests only — no keys, no database
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-LLM_BACKEND=fake uvicorn app.main:app --reload      # http://localhost:8000/docs
+pytest -q                                           # scripted LLM + in-memory brain
 ```
 
 ### 2. Full stack with Docker (Neo4j + API)
 
 ```bash
-cp .env.example .env              # add ANTHROPIC_API_KEY (and/or OPENAI_API_KEY) — or set LLM_BACKEND=fake
+cp .env.example .env              # add OPENAI_API_KEY and/or ANTHROPIC_API_KEY
 docker compose up --build         # Neo4j browser: http://localhost:7474 (neo4j / please-change-me)
 ```
 
@@ -48,11 +48,11 @@ Everything is an environment variable (or `.env`); see [`app/config.py`](app/con
 |---|---|---|
 | `BRAIN_BACKEND` | `memory` | `neo4j` or `memory` (in-process, for tests/dev) |
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` / `NEO4J_DATABASE` | `bolt://localhost:7687` / `neo4j` / `neo4j` / `neo4j` | Neo4j connection; empty `NEO4J_USER` disables auth |
-| `LLM_BACKEND` | `litellm` | `litellm` (real providers) or `fake` (scripted, offline) |
 | `STRONG_MODEL` | `anthropic/claude-opus-5-5` | LiteLLM model for `answer`, `memory_recall`, `followup` |
 | `SMALL_MODEL` | `anthropic/claude-haiku-5-5` | LiteLLM model for `analyze`, `extract`, `reconcile`, summarisation, smalltalk |
 | `FALLBACK_MODEL` | *(empty)* | Optional fallback provider/model, e.g. `openai/gpt-4o-mini`; the Router falls back to it when the primary fails |
 | `LLM_TIMEOUT_S` / `LLM_NUM_RETRIES` | `30` / `1` | Per-call timeout and Router retries before fallback |
+| `LLM_TEMPERATURE_STRUCTURED` / `LLM_TEMPERATURE_REPLY` | `0.0` / `0.4` | Sampling temperature for decision tasks (`analyze`, `extract`, `reconcile`, `summarize`) and for user-facing replies. Decisions are pinned to 0 so routing and conflict resolution are reproducible |
 | `CHECKPOINTER` / `CHECKPOINTER_URL` | `memory` | `memory` (`InMemorySaver`) or `postgres` (`pip install -e ".[postgres]"`) |
 | `BUDGET_*` | 30/150/100/600/300/1200 | Token budgets per prompt layer (§3) |
 | `COMPACT_THRESHOLD_TOKENS` / `KEEP_LAST_MESSAGES` | `1200` / `6` | Session compaction (§8) |
@@ -72,7 +72,9 @@ from the provider's usual variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …).
 | `POST` | `/chat` | Chat turn |
 | `GET` | `/users/{user_id}/memories?life_area=&status=active\|superseded\|deleted\|all` | Memories ranked by retrieval score |
 | `DELETE` | `/users/{user_id}/memories/{memory_id}` | Forget (soft delete, removed from retrieval) |
+| `GET` | `/users/{user_id}/memory-runs?session_id=&since=` | What the background memory graph did, per turn |
 | `GET` | `/health` | Liveness + brain/LLM status |
+| `GET` | `/ui/` | The orchestration console (§ below) |
 
 ```bash
 curl -s localhost:8000/chat -H 'content-type: application/json' -d '{
@@ -86,6 +88,7 @@ curl -s localhost:8000/chat -H 'content-type: application/json' -d '{
   "route": "answer", "language": "en",
   "context_used": ["user_profile", "memory_index", "memory:career_change", "recent_turns"],
   "context_tokens": {"meta": 23, "profile": 35, "index": 13, "memories": 26, "summary": 0, "turns": 93},
+  "tools_used": [{"name": "recall_memories", "args": {"life_area": "career", "query": "job switch"}, "result": "…"}],
   "degraded": []
 }
 ```
@@ -93,6 +96,25 @@ curl -s localhost:8000/chat -H 'content-type: application/json' -d '{
 `ephemeral: true` reads memory but writes nothing. `sync_memory: true` (debug aid) runs the memory graph before
 responding so the next request is guaranteed to see the write. `degraded` reports `brain_unavailable` /
 `llm_unavailable` instead of failing the request.
+
+## Orchestration console
+
+`http://localhost:8000/ui/` (also served at `/`) is a single static page — no build step, no dependencies — that
+chats against `/chat` and shows what each turn actually did:
+
+- **Response graph** — the route the turn took (`answer` / `followup` / `memory_recall` / `memory_cmd` /
+  `smalltalk`), the detected language and any `degraded` flag.
+- **Context assembled** — a bar per layer against its token budget, plus the `context_used` keys, so it is visible
+  that a follow-up carries no memories and a career question carries `memory:career_change`.
+- **Agent tools** — each `recall_memories` / `get_astro_profile` / `search_past_sessions` call with its arguments
+  and the result the model got back, or a note that the pre-loaded context was enough.
+- **Memory graph** — the background pipeline for that turn: extracted candidates → what the filter kept or dropped
+  and why → the reconcile action per candidate (`ADD` / `UPDATE` / `SUPERSEDE` / `NOOP` / `PROFILE` / `SKIP`) with
+  its reason → what was written. It polls `/users/{id}/memory-runs` because the graph runs after the reply.
+- **Shared brain** — every memory for the user, superseded ones greyed out, with confidence, importance and
+  retrieval score.
+
+Click any earlier reply to re-inspect that turn. The preset buttons replay the walkthrough from the architecture doc.
 
 ## Project layout
 
@@ -109,10 +131,11 @@ app/
 │   └── nodes/              # one module per node (+ memory_ops.py: shared pipeline primitives)
 ├── tools/brain_tools.py    # recall_memories · get_astro_profile · search_past_sessions (read-only ToolNode tools)
 ├── brain/                  # models.py · scoring.py · repository.py (protocol) · neo4j_repo.py · memory_repo.py
-├── llm/                    # provider.py (protocol + structured-output retry) · litellm_provider.py · fake.py
+├── llm/                    # provider.py (protocol + structured-output retry) · litellm_provider.py
 ├── context/builder.py      # L0–L3 + ST layers with token budgets
 ├── profile/zodiac.py       # sun-sign stub
-└── prompts/templates.py    # versioned prompts (PROMPT_VERSION recorded on every memory)
+├── prompts/templates.py    # versioned prompts (PROMPT_VERSION recorded on every memory)
+└── static/index.html       # the orchestration console served at /ui
 tests/                      # see below
 eval/                       # labelled set + storage-accuracy / threshold-sweep script
 docs/ARCHITECTURE.md        # the design this implements
@@ -122,38 +145,51 @@ docker-compose.yml · Dockerfile · demo.http
 ## Testing
 
 ```bash
-pytest -q                   # no network, no keys, no database needed: ~10 s
+pytest -q                   # 36 tests, no network, no keys, no database needed: ~3 s
 ruff check app tests eval
 ```
 
 | Layer | Where | What it proves |
 |---|---|---|
-| Rules & scoring | `test_rules.py`, `test_scoring.py`, `test_zodiac.py` | Routing shortcuts, language detection, confidence/importance/decay/expiry maths |
-| Context layers | `test_context_builder.py` | Every layer stays inside its budget, stable layers come first, `context_used`/`context_tokens` are right |
-| LLM contract | `test_llm_provider.py` | JSON extraction, structured-output retry with the validation error, give-up after one retry, failure surfacing |
-| Memory pipeline | `test_memory_pipeline.py` | Filter rules, rules-first reconcile (ADD/NOOP/UPDATE/SUPERSEDE/PROFILE/SKIP), parallel `Send` fan-out, idempotent re-runs |
-| §15 scenarios 1–12 + walkthrough | `test_chat_scenarios.py` | New user, create/retrieve/correct memories, follow-up without brain calls, cross-session recall, irrelevant memories excluded, brain down, LLM down, Hinglish, bounded tool loop, expiry, remember/forget, ephemeral, compaction + past-session search, language precedence |
-| HTTP API | `test_api_users.py` | CRUD, validation (422), isolation by `user_id`, soft delete, health |
-| Repository contract | `test_repo_contract.py` | Same contract run against the in-memory repo **and real Neo4j** (`NEO4J_TEST_URI`) |
-| **Every LLM API path** | `test_litellm_provider.py` | Real LiteLLM Router against a local mock provider that speaks both the **OpenAI** and **Anthropic** wire formats: task→tier routing, request shape (system, tools, `max_tokens`, auth headers), tool-call parsing both ways, structured retry through the router, fallback on 5xx / 429 / 529 / timeout, all-down → `LLMUnavailable`, and the full HTTP → graph → Router → mock stack including a mid-conversation outage |
+| §15 scenarios + walkthrough | `test_chat_scenarios.py` | New user, create/retrieve/correct memories, follow-up without brain calls, cross-session recall, irrelevant memories excluded, brain down, LLM down, Hinglish, bounded tool loop, expiry, remember/forget, ephemeral, compaction + past-session search, language precedence |
+| Building blocks | `test_basics.py` | Routing shortcuts and language detection, confidence/importance/decay/expiry maths, context layers inside their budgets, structured-output retry, HTTP API CRUD + validation + isolation |
 
 With a provider key set, [`demo.http`](demo.http) is the live check: it replays the §13 walkthrough against real models.
-
-Against a real Neo4j (e.g. `docker compose up neo4j`):
-
-```bash
-NEO4J_TEST_URI=bolt://localhost:7687 NEO4J_TEST_USER=neo4j NEO4J_TEST_PASSWORD=please-change-me pytest -q
-```
 
 ### Memory-accuracy eval (§16)
 
 ```bash
-python -m eval.run_eval --backend fake      # offline, deterministic
-python -m eval.run_eval --backend litellm   # with the real extraction model
+python -m eval.run_eval                     # runs the real extraction model (needs a provider key)
 ```
 
 Reports storage-decision precision/recall at several confidence thresholds (validating the 0.6 default), label
 accuracy for `certainty` / `subject` / `type`, and missed/unexpected candidates. Results land in `eval/results/`.
+
+### Is the Shared Brain improving answers? (§16)
+
+Memory accuracy is the one dimension cheap enough to measure offline, so it is the part that ships as a script. The
+rest need a live pair of runs; the design is the same throughout — **hold the questions fixed and vary only the
+brain**, because without an A/B there is nothing to attribute an improvement to.
+
+The harness for all of them is one knob already in the API: `ephemeral: true` reads the brain but writes nothing, and
+a fresh `user_id` has no brain at all. So "brain off" needs no special build — replay the same script against a
+virgin user and compare.
+
+| Dimension | What I'd measure | How |
+|---|---|---|
+| **Memory accuracy** | Did it store the right things? | `python -m eval.run_eval`: precision/recall of the store/don't-store decision over 30 labelled messages, swept across confidence thresholds, plus per-label accuracy for `certainty` / `subject` / `type`. This is what validates the 0.6 threshold rather than asserting it. |
+| **Context relevance** | Of the memories injected, how many belonged? | `context_used` is returned on every `/chat` reply, so this is countable, not judged: label the expected memory keys per question, then report precision@k of the injected set. Scenario 6 is the single-case version — a health memory must not appear in a career answer. |
+| **Irrelevant context** | The same number read as a failure rate | The false-positive half of the above. It matters separately because the failure is silent: a wrong memory does not error, it just makes the answer subtly wrong. Watching it stops retrieval recall from being bought with noise. |
+| **Personalization** | Is the answer actually *about this user*? | Same 15 questions, brain on vs brain off, shuffled and scored blind by an LLM judge on three axes: uses a stored fact correctly, invents no fact that is not stored, and stays astrologically specific. Reporting win/tie/loss is more honest than a mean score. |
+| **Conversation consistency** | Does it contradict itself across sessions? | Replay multi-session scripts (the §13 walkthrough is one), then check every reply against the memories active at that turn and count contradictions. The correction case is the sharp one: after "actually this year, not next", any later mention of 2027 is a defect. |
+| **Memory persistence** | Does it survive the process? | Write memories, restart the container, assert the same recall in a new session with a new checkpointer thread. Scenario 5 covers the session boundary in-memory; this covers the storage boundary for real. |
+| **Cost / latency** | What is personalization costing? | `context_tokens` per layer is already in every response, so the context budget is measurable per turn; pair it with per-node latency from tracing. A brain that improves answers by 5% at triple the prompt size is a bad trade and should show up as one. |
+
+Two things I would watch out for rather than report as wins. An LLM judge scoring its own system's output is a
+generous judge — the blind shuffle is the minimum guard, and a couple of dozen human-labelled turns are worth more
+than a thousand judged ones. And aggregate quality can rise while the brain gets worse, because better answers also
+come from the model simply being good; that is the reason every dimension above is a *paired* comparison on the same
+question rather than an absolute score.
 
 ## How a turn works
 
@@ -194,6 +230,13 @@ LLM nodes carry `RetryPolicy(max_attempts=2)` and a node-level `error_handler` t
   avoids provider-specific forced-tool JSON modes (which newer Anthropic models reject).
 - **Token counting** is a 4-chars-per-token estimate; budgets are enforced on that estimate so no tokenizer download
   is needed. Swap `app/context/tokens.py` for a provider tokenizer if exact accounting matters.
+- **Prompts are XML-structured and versioned** (`app/prompts/templates.py`, `PROMPT_VERSION = "v3"`). Tagged sections
+  (`<task>`, `<rules>`, `<examples>`, …) let one rule be revised without disturbing the rest. Prompt text is
+  English-only; the reply language is an instruction resolved against the meta layer.
+- **Routing rules live in the prompt, not in code.** `ANALYZE_SYSTEM` draws the line between the user *stating*
+  something (`answer`) and *asking what is stored* (`memory_recall`), and between continuing a topic (`answer`) and
+  referring back to a reply (`followup`); deterministic regex rules in `app/graphs/rules.py` still short-circuit the
+  obvious cases before any model call.
 - `prompt_version` is recorded on every memory (§17) as a dedicated property.
 
 ## Production notes

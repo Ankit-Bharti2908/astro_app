@@ -13,6 +13,8 @@ from app.api.schemas import (
     ChatResponse,
     HealthOut,
     MemoryOut,
+    MemoryRunOut,
+    ToolCallOut,
     UserCreate,
     UserOut,
     UserPatch,
@@ -154,8 +156,14 @@ async def chat(body: ChatRequest, background: BackgroundTasks, request: Request)
         context_used=list(state.get("context_used", [])),
         context_tokens=dict(state.get("context_tokens", {})),
         degraded=list(state.get("degraded", [])),
+        tools_used=_tools_used(state),
         memory_cmd_result=state.get("memory_cmd_result") or None,
     )
+
+
+def _tools_used(state: dict[str, Any]) -> list[ToolCallOut]:
+    """This turn's agent tool calls, recorded by the agent node before the transcript is trimmed (§4)."""
+    return [ToolCallOut(**t) for t in state.get("tool_trace", [])]
 
 
 def _previous_assistant_reply(state: dict[str, Any]) -> str:
@@ -165,6 +173,45 @@ def _previous_assistant_reply(state: dict[str, Any]) -> str:
         content = ai[-2].content
         return content if isinstance(content, str) else str(content)
     return state.get("summary") or ""
+
+
+# ---- memory graph trace ---------------------------------------------------------
+
+@router.get("/users/{user_id}/memory-runs", response_model=list[MemoryRunOut])
+async def memory_runs(
+    user_id: str,
+    request: Request,
+    session_id: str | None = Query(default=None),
+    since: int = Query(default=0, ge=0, description="only runs with seq > since"),
+):
+    """What the background memory graph did, per turn: extracted candidates, what the filter
+    dropped, the reconcile decision per candidate and what was written (§5). Observability for
+    the UI and for debugging — the writes themselves are visible via /users/{user_id}/memories."""
+    c = _container(request)
+    out: list[MemoryRunOut] = []
+    for seq, run in enumerate(c.memory_runs, start=1):
+        payload, result = run["payload"], run.get("result") or {}
+        if seq <= since or payload.get("user_id") != user_id:
+            continue
+        if session_id and payload.get("session_id") != session_id:
+            continue
+        out.append(
+            MemoryRunOut(
+                seq=seq,
+                user_id=user_id,
+                session_id=payload.get("session_id", ""),
+                message=payload.get("message", ""),
+                candidates=result.get("candidates") or [],
+                accepted=result.get("accepted") or [],
+                dropped=result.get("dropped") or [],
+                decisions=result.get("decisions") or [],
+                written=result.get("written") or [],
+                degraded=result.get("degraded") or [],
+                skipped_reason=result.get("skipped_reason"),
+                error=run.get("error"),
+            )
+        )
+    return out
 
 
 # ---- health ---------------------------------------------------------------------

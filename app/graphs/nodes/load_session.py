@@ -35,6 +35,7 @@ def make_load_session(deps: Deps):
             "context_used": [],
             "context_tokens": {},
             "memory_ids_used": [],
+            "tool_trace": [],
             "tool_rounds": 0,
             "response": "",
             "memory_cmd_result": {},

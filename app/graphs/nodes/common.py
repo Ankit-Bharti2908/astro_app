@@ -69,6 +69,22 @@ def current_turn_tool_artifacts(messages: list[AnyMessage]) -> tuple[list[str], 
     return used, ids, degraded
 
 
+def current_turn_tool_trace(messages: list[AnyMessage], *, result_chars: int = 600) -> list[dict]:
+    """This turn's tool calls paired with their results, for the API response.
+
+    `intra_turn_cleanup` deletes the tool traffic from the transcript once the reply is ready,
+    so the trace has to be captured while the messages are still there.
+    """
+    start = current_turn_start(messages)
+    results = {m.tool_call_id: _text(m.content) for m in messages[start:] if isinstance(m, ToolMessage)}
+    return [
+        {"name": call["name"], "args": call.get("args") or {}, "result": results.get(call["id"], "")[:result_chars]}
+        for m in messages[start:]
+        if isinstance(m, AIMessage)
+        for call in m.tool_calls
+    ]
+
+
 def merge_unique(*lists: list[str]) -> list[str]:
     out: list[str] = []
     for lst in lists:
@@ -78,7 +94,7 @@ def merge_unique(*lists: list[str]) -> list[str]:
     return out
 
 
-def final_reply(state: ChatState, text: str, *, context_used, context_tokens, memory_ids=None, degraded=None) -> dict:
+def final_reply(state: ChatState, text: str, *, context_used, context_tokens, memory_ids=None, tool_trace=None, degraded=None) -> dict:
     cleanup = intra_turn_cleanup(state.get("messages", []))
     return {
         "messages": [*cleanup, AIMessage(content=text)],
@@ -86,6 +102,7 @@ def final_reply(state: ChatState, text: str, *, context_used, context_tokens, me
         "context_used": context_used,
         "context_tokens": context_tokens,
         "memory_ids_used": memory_ids or [],
+        "tool_trace": tool_trace or [],
         "degraded": merge_unique(state.get("degraded", []), degraded or []),
     }
 

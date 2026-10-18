@@ -13,6 +13,7 @@ from app.context.builder import build_context
 from app.graphs.deps import Deps
 from app.graphs.nodes.common import (
     current_turn_tool_artifacts,
+    current_turn_tool_trace,
     final_reply,
     merge_unique,
     parse_now,
@@ -52,6 +53,7 @@ def make_answer_agent(deps: Deps):
             prefetched = [Memory.model_validate(m) for m in prefetched_raw]
 
         tool_used, tool_ids, tool_degraded = current_turn_tool_artifacts(state.get("messages", []))
+        tool_trace = current_turn_tool_trace(state.get("messages", []))
         degraded += tool_degraded
 
         # 2. bounded context
@@ -91,6 +93,7 @@ def make_answer_agent(deps: Deps):
                 "context_used": context_used,
                 "context_tokens": ctx.context_tokens,
                 "memory_ids_used": memory_ids,
+                "tool_trace": tool_trace,
                 "degraded": merge_unique(state.get("degraded", []), degraded),
             }
 
@@ -100,7 +103,10 @@ def make_answer_agent(deps: Deps):
                 await deps.repo.touch_used(state["user_id"], memory_ids, now=now)  # §7.4 reinforcement
             except BrainUnavailable:
                 degraded.append("brain_unavailable")
-        return final_reply(state, text, context_used=context_used, context_tokens=ctx.context_tokens, memory_ids=memory_ids, degraded=degraded)
+        return final_reply(
+            state, text, context_used=context_used, context_tokens=ctx.context_tokens,
+            memory_ids=memory_ids, tool_trace=tool_trace, degraded=degraded,
+        )
 
     return answer_agent
 
