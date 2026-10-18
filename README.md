@@ -135,7 +135,6 @@ app/
 │   ├── state.py            # ChatState, MemoryState
 │   ├── response_graph.py   # load_session → analyze → learn → {answer_agent ⇄ fetch_context | followup | memory_recall | memory_cmd | smalltalk} → maybe_compact
 │   ├── memory_graph.py     # extract → score → filter → Send(reconcile)* → write
-│   ├── rules.py            # rules-first routing, route honouring, life-area keywords
 │   └── nodes/              # one module per node (+ memory_ops.py: shared pipeline primitives)
 ├── tools/brain_tools.py    # recall_memories · get_astro_profile · search_past_sessions (read-only ToolNode tools)
 ├── brain/                  # models.py · scoring.py · repository.py (protocol) · neo4j_repo.py · memory_repo.py
@@ -153,7 +152,7 @@ docker-compose.yml · Dockerfile · demo.http
 ## Testing
 
 ```bash
-pytest -q                   # 45 tests, no network, no keys, no database needed: ~3 s
+pytest -q                   # 42 tests, no network, no keys, no database needed: ~3 s
 ruff check app tests eval
 python -m eval.run_eval     # memory-accuracy eval (needs a provider key)
 ```
@@ -174,10 +173,10 @@ models.
 1. **`load_session`** loads L0 (date, timezone, language), L1 (profile card, naming the slots still missing) and L2
    (memory index: one line per life area). The checkpointer (thread = `user_id:session_id`) has already restored the
    session messages and summary. Neo4j failure → `degraded: ["brain_unavailable"]`, continue on short-term context.
-2. **`analyze`** routes with rules first (follow-ups, remember/forget, "what do you remember", greetings); everything
-   else goes to the small model with structured output (route, life areas, language). The classifier's route is then
-   checked against the message — `memory_cmd` acknowledges rather than answers, so it is only honoured where a real
-   remember/forget verb is present. Language precedence: explicit request → message → profile preference.
+2. **`analyze`** asks the small model for route, life areas and language, with structured output. Every turn asks:
+   the keyword short-circuit that used to catch greetings and follow-ups is gone, because the same word lists routed
+   "Remove obstacles from my career" into a delete. Language precedence: explicit request → message → profile
+   preference.
 3. **`learn`** runs the **memory graph** *before* any reply node, for `answer` / `followup` / `memory_recall`
    (never for smalltalk, memory commands or ephemeral chats): the small model extracts `MemoryCandidate`s (features
    only, canonical English, relative dates resolved), rules score and filter them, one `reconcile` runs per candidate
@@ -190,7 +189,8 @@ models.
    ToolNode. Memories used get `last_used_at` reinforced — except ones this same turn wrote. Tool traffic is dropped
    from the persisted history.
 5. **`followup`** / **`memory_recall`** / **`memory_cmd`** / **`smalltalk`** as in §4; `memory_cmd` writes inline
-   (remember = extract with `user_asked_to_remember`, forget = `status: deleted`).
+   (remember = extract with `user_asked_to_remember`, forget = `status: deleted`). A forget's targets are named by
+   the model from the memories themselves, and code bounds it to ids it was shown (§7.6).
 6. **`maybe_compact`** incrementally summarises older turns when the session exceeds the budget, removes them with
    `RemoveMessage`, persists the summary on the `Session` node (searchable by `search_past_sessions`).
 
@@ -213,19 +213,22 @@ LLM nodes carry `RetryPolicy(max_attempts=2)` and a node-level `error_handler` t
   text is still never a source of user facts.
 - **Profile facts** (`name`, `dob`, `tob`, `birth_place`, `preferred_language`) are written to the `User` node (zodiac
   recomputed) rather than stored as `Memory` nodes; other `profile_fact`s are single-valued memories.
-- **Never-store** is a label the extractor emits (`sensitive_category`) plus a rule-based backstop for health
-  diagnoses and financial details, applied in the deterministic filter.
+- **Never-store** is a label the extractor emits (`sensitive_category`), applied in the deterministic filter. A
+  keyword backstop under it was removed: a term list recognises only its own terms, so it caught `diabetes` and not
+  "my sugar is high", while reading like a guarantee. The prompt defines the categories by substance; the labelled
+  eval measures how well they are applied.
 - **Structured output** is provider-neutral: schema in the prompt, parse, validate, retry once with the error. This
   avoids provider-specific forced-tool JSON modes (which newer Anthropic models reject).
 - **Token counting** is a 4-chars-per-token estimate; budgets are enforced on that estimate so no tokenizer download
   is needed. Swap `app/context/tokens.py` for a provider tokenizer if exact accounting matters.
-- **Prompts are XML-structured and versioned** (`app/prompts/templates.py`, `PROMPT_VERSION = "v5"`). Tagged sections
+- **Prompts are XML-structured and versioned** (`app/prompts/templates.py`, `PROMPT_VERSION = "v6"`). Tagged sections
   (`<task>`, `<rules>`, `<examples>`, …) let one rule be revised without disturbing the rest. Prompt text is
   English-only; the reply language is an instruction resolved against the meta layer.
-- **Routing rules live in the prompt, not in code.** `ANALYZE_SYSTEM` draws the line between the user *stating*
-  something (`answer`) and *asking what is stored* (`memory_recall`), and between continuing a topic (`answer`) and
-  referring back to a reply (`followup`); deterministic regex rules in `app/graphs/rules.py` still short-circuit the
-  obvious cases before any model call.
+- **Routing lives in the prompt, not in code.** `ANALYZE_SYSTEM` draws every line: stating something (`answer`) vs
+  asking what is stored (`memory_recall`), continuing a topic (`answer`) vs referring back to a reply (`followup`),
+  and what counts as an instruction about memory. There is no keyword short-circuit — `app/graphs/rules.py` was
+  deleted. Two things in `analyze.py` are not judgements and stay in code: a `followup` needs a previous reply to
+  exist, and a message with no Devanagari in it is not written in Devanagari, whatever the model labelled it.
 - `prompt_version` is recorded on every memory (§17) as a dedicated property.
 
 ## Production notes

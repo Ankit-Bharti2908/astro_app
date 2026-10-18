@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from app.graphs.rules import detect_language, explicit_language_request, guess_life_areas
 from app.llm.provider import (
     BaseLLMProvider,
     LLMMessage,
@@ -25,6 +24,99 @@ from app.llm.provider import (
 )
 
 Scripted = LLMResponse | str | dict | list | Callable[[list[LLMMessage], list[ToolSpec] | None], LLMResponse]
+
+# ---------------------------------------------------------------------------
+# A stand-in for the classifier. These word lists used to live in `app/graphs/rules.py` and
+# decide real routes; they were removed because a word list cannot judge what a sentence
+# means. They are kept here, where their job is only to make a scripted "model" behave
+# plausibly enough that the code under test is exercised. Nothing in `app/` imports them.
+# ---------------------------------------------------------------------------
+
+_DEVANAGARI = re.compile(r"[ऀ-ॿ]")
+_HINGLISH_TOKENS = {
+    "kab", "hogi", "hoga", "meri", "mera", "mere", "kya", "hai", "hain", "nahi", "nahin", "kaise",
+    "kyun", "kyon", "agle", "saal", "naukri", "shaadi", "mujhe", "main", "hoon", "kar", "karna",
+    "karu", "karoon", "chahiye", "batao", "bata", "mujhko", "kuch", "bahut", "abhi", "kal", "aaj",
+    "paisa", "paise", "ghar", "pyaar", "dost", "zindagi", "bhai", "didi", "yaar", "accha", "theek",
+    "sahi", "galat", "kaam", "padhai", "sehat", "rishta", "rishtey", "mann", "dil", "waqt", "samay",
+}
+_LIFE_AREA_WORDS: dict[str, tuple[str, ...]] = {
+    "career": ("job", "jobs", "career", "work", "promotion", "interview", "boss", "office", "naukri", "kaam", "salary hike", "startup", "business", "profession", "resign", "employer", "pm "),
+    "relationships": ("marriage", "marry", "married", "shaadi", "love", "partner", "girlfriend", "boyfriend", "relationship", "pyaar", "wife", "husband", "dating", "breakup", "rishta", "soulmate", "wedding"),
+    "health": ("health", "sehat", "sick", "illness", "diet", "exercise", "fitness", "sleep", "stress", "doctor", "hospital", "disease", "medical", "anxiety", "diabetes"),
+    "finance": ("money", "paisa", "paise", "finance", "financial", "invest", "investment", "savings", "loan", "debt", "wealth", "stock", "stocks", "property", "income"),
+    "family": ("family", "parents", "mother", "father", "mom", "dad", "kids", "children", "child", "parivar", "brother", "sister", "son", "daughter", "in-laws"),
+    "education": ("study", "studies", "exam", "exams", "college", "degree", "university", "padhai", "course", "learning", "school", "phd", "masters"),
+    "spirituality": ("meditation", "puja", "spiritual", "spirituality", "temple", "god", "karma", "prayer", "mantra", "yoga", "dharma", "faith", "religion"),
+}
+_FOLLOWUP = re.compile(
+    r"^(why|why so|why\?|why do you say that|how so|explain( that| this| more)?|elaborate|tell me more|"
+    r"what do you mean|can you explain|say more|more details|and then|go on|really\??|are you sure|"
+    r"what about (that|this|it)|kyun|kyon|aisa kyun|matlab)\b",
+    re.I,
+)
+_RECALL = re.compile(
+    r"(what do you (remember|know) about( me| my)?|do you remember|what have you (stored|saved|remembered)|"
+    r"what('s| is) in (your|my) memory|kya yaad hai|tumhe kya yaad|what did i tell you)",
+    re.I,
+)
+_SMALLTALK = re.compile(
+    r"^(hi|hello|hey|hii+|namaste|namaskar|good (morning|evening|night|afternoon)|thanks|thank you|"
+    r"thanks a lot|ok|okay|cool|great|nice|bye|goodbye|how are you\??|shukriya|dhanyavaad)[\s!.]*$",
+    re.I,
+)
+_EXPLICIT_LANGUAGE = re.compile(
+    r"(reply|answer|respond|talk|speak|baat karo)\s+(to me\s+)?in\s+(hindi|english|hinglish)", re.I
+)
+
+
+def explicit_language_request(message: str) -> str | None:
+    m = _EXPLICIT_LANGUAGE.search(message)
+    if not m:
+        return None
+    return {"hindi": "hi", "english": "en", "hinglish": "hinglish"}[m.group(3).lower()]
+
+
+def detect_language(message: str) -> str:
+    explicit = explicit_language_request(message)
+    if explicit:
+        return explicit
+    if _DEVANAGARI.search(message):
+        return "hi"
+    tokens = re.findall(r"[a-zA-Z]+", message.lower())
+    hits = sum(1 for t in tokens if t in _HINGLISH_TOKENS)
+    if hits >= 2 or (hits >= 1 and len(tokens) <= 4):
+        return "hinglish"
+    return "en"
+
+
+def guess_life_areas(message: str) -> list[str]:
+    text = f" {message.lower()} "
+    return [area for area, words in _LIFE_AREA_WORDS.items() if any(w in text for w in words)]
+
+
+_MEMORY_VERB_PREFIX = re.compile(r"^(please\s+)?(remember|note|save|store|forget|delete|remove|erase|yaad rakh\w*|bhool ja\w*)\s*(that|about|the|ki)?\s*", re.I)
+_FORGET_VERB = re.compile(r"^(please\s+)?(forget|delete|remove|erase|bhool ja\w*)\b", re.I)
+
+
+def _route_of(message: str, *, has_history: bool) -> str:
+    """The route a competent classifier would pick — the real one is an LLM (§4).
+
+    `app/` no longer routes by keyword at all, so the stand-in has to make the whole judgement
+    or nothing below it is exercised. The memory-command arm is kept crude on purpose: an
+    imperative that runs into a second clause or a question is not an instruction about
+    memory, which is exactly the distinction the deleted word lists could not draw.
+    """
+    text = message.strip()
+    if _MEMORY_VERB_PREFIX.match(text) and "?" not in text and "," not in text:
+        return "memory_cmd"
+    if _RECALL.search(text):
+        return "memory_recall"
+    if _SMALLTALK.match(text):
+        return "smalltalk"
+    if has_history and len(text.split()) <= 8 and _FOLLOWUP.match(text):
+        return "followup"
+    return "answer"
 
 
 @dataclass
@@ -101,21 +193,51 @@ class FakeLLM(BaseLLMProvider):
             "memory_recall": self._recall,
             "smalltalk": self._smalltalk,
             "memory_cmd": self._extract,
+            "memory_cmd_select": self._memory_cmd_select,
         }.get(task, self._answer)
         return handler(system, user, messages)
 
     def _analyze(self, system: str, user: str, messages) -> LLMResponse:
         m = re.search(r"<message>\s*(.*?)\s*</message>", user, flags=re.S)
         message = m.group(1).strip() if m else user
+        prev = re.search(r"<previous_assistant_reply>\s*(.*?)\s*</previous_assistant_reply>", user, flags=re.S)
+        has_history = bool(prev and prev.group(1).strip() not in ("", "(none)"))
         areas = guess_life_areas(message) or ["general"]
         payload = {
-            "route": "answer",
+            "route": _route_of(message, has_history=has_history),
             "life_areas": areas,
             "language": detect_language(message),
             "explicit_language": explicit_language_request(message),
             "reason": "fake",
         }
         return LLMResponse(content=json.dumps(payload))
+
+    def _memory_cmd_select(self, system: str, user: str, messages) -> LLMResponse:
+        """Stand-in for the model that reads a memory instruction (§7.6).
+
+        Deliberately conservative in the same direction the prompt asks for: a memory is a
+        target only when the instruction names the whole of it, so an instruction that merely
+        shares a word with a stored memory matches nothing. The real model matches on meaning;
+        what both must agree on is that a partial overlap is not a reference.
+        """
+        m = re.search(r"<message>\s*(.*?)\s*</message>", user, flags=re.S)
+        message = (m.group(1) if m else user).strip()
+        memories = _xml_json(user, "stored_memories") or []
+        body = _MEMORY_VERB_PREFIX.sub("", message).strip(" .!?,").lower()
+        plan = {
+            "command": "forget" if _FORGET_VERB.match(message) else "remember",
+            "names_a_target": bool(body) and body not in {"that", "it", "this", "them"},
+            "memory_ids": [],
+            "forget_all": body in {"everything", "all", "all my memories", "sab kuch", "sab"},
+            "reason": "fake",
+        }
+        if plan["command"] == "forget" and plan["names_a_target"] and not plan["forget_all"]:
+            plan["memory_ids"] = [
+                mem["id"]
+                for mem in memories
+                if all(tok in body for tok in str(mem.get("key", "")).split("_") if len(tok) > 2)
+            ]
+        return LLMResponse(content=json.dumps(plan))
 
     def _extract(self, system: str, user: str, messages) -> LLMResponse:
         today = _current_date(system) or date.today()

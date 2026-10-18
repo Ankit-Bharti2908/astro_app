@@ -250,6 +250,45 @@ def test_untargeted_forget_never_wipes_the_brain(client):
     assert len(d["memory_cmd_result"]["deleted"]) == 2 and memories(client) == []
 
 
+def test_a_question_can_never_delete_a_memory(client):
+    """Observed: "Remove obstacles from my career, what should I do?" answered "Done — I've
+    forgotten: switch jobs."
+
+    Two keyword rules did it. The route was decided by a leading verb, so an imperative about
+    obstacles read as an instruction about memory; the target was then any memory sharing any
+    word with the rest of the sentence, and `career` appeared in both. Both are gone: the
+    route is the classifier's judgement, and a target has to be named, not merely overlapped.
+    """
+    chat(client, "Planning to switch jobs next year.")
+    chat(client, "Remember that I love classical music")
+    before = {m["key"] for m in memories(client)}
+
+    for question in (
+        "Remove obstacles from my career, what should I do?",
+        "Forget it, tell me about my career instead",
+        "Delete my doubts about marriage please",
+        "Erase these doubts, is 2027 good for a job switch?",
+    ):
+        d = chat(client, question)
+        assert not (d.get("memory_cmd_result") or {}).get("deleted"), question
+        assert {m["key"] for m in memories(client)} == before, question
+
+
+def test_a_forget_may_only_touch_memories_it_was_shown(client, fake_llm, repo):
+    """The model names the targets, so the ids it names are the bound worth enforcing: one it
+    was never shown is not a memory it may delete (§7.6)."""
+    chat(client, "Planning to switch jobs next year.")
+    mine = memories(client)[0]["id"]
+    fake_llm.script("memory_cmd_select", {
+        "command": "forget", "names_a_target": True,
+        "memory_ids": [mine, "not-a-real-id", "m-belonging-to-someone-else"],
+        "forget_all": False, "reason": "scripted",
+    })
+    d = chat(client, "Forget about my job plans")
+    assert d["memory_cmd_result"]["deleted"] == [mine]  # the invented ids are dropped, not fetched
+    assert memories(client) == []
+
+
 def test_ephemeral_turn_mutates_nothing(client, repo):
     """A temporary chat may read the brain but must not write to it — including the forget
     command and the last_used_at reinforcement that a normal read performs."""
@@ -284,8 +323,12 @@ def test_llm_down_returns_canned_reply_with_degraded_flag(client, fake_llm, app)
     assert len(fake_llm.calls_for("answer")) == 2  # RetryPolicy(max_attempts=2)
     run = app.state.container.memory_runs[-1]["result"]
     assert run["skipped_reason"] == "extraction_failed" and memories(client) == []
+    # With the classifier down there is no routing left — every turn falls back to `answer`.
+    # Nothing user-facing changes: both routes answer through the same canned reply, and the
+    # alternative was a keyword table that routed questions into a delete (§4).
     d = chat(client, "Why?")
-    assert d["route"] == "followup" and d["degraded"] == ["llm_unavailable"]
+    assert d["route"] == "answer" and d["degraded"] == ["llm_unavailable"]
+    assert "trouble reaching" in d["response"]
     fake_llm.fail_all = False
     d = chat(client, "Meri shaadi kab hogi?")
     assert d["degraded"] == [] and d["language"] == "hinglish"

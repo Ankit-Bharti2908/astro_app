@@ -12,7 +12,7 @@ RECONCILE_SYSTEM) use single braces.
 Bump PROMPT_VERSION when any template changes.
 """
 
-PROMPT_VERSION = "v5"
+PROMPT_VERSION = "v6"
 
 # ---- response-side system prompts ----------------------------------------------
 
@@ -150,8 +150,9 @@ An explicit instruction to store or delete something: "remember that I prefer mo
 </route>
 
 <route name="smalltalk">
-Greetings, thanks, sign-offs and passing remarks that ask nothing and carry nothing durable:
-"hi", "thank you", "it rained a lot here yesterday".
+Greetings, thanks, sign-offs, bare acknowledgements ("ok", "cool", "got it") and passing
+remarks that ask nothing and carry nothing durable: "hi", "thank you", "it rained a lot here
+yesterday".
 </route>
 </routes>
 
@@ -178,7 +179,13 @@ Greetings, thanks, sign-offs and passing remarks that ask nothing and carry noth
 <fields>
 - route: one of answer | followup | memory_recall | memory_cmd | smalltalk.
 - life_areas: subset of [career, relationships, health, finance, family, education,
-  spirituality] the message concerns; empty list if none applies.
+  spirituality] the message concerns; empty list if none applies. Judge by what the message
+  is ABOUT, not by whether it uses a particular word — "my boss makes my life hell" is
+  career, "I finally slept properly" is health. A message can touch two areas; most touch
+  none. career covers work, jobs, business and study-for-work; relationships covers marriage,
+  partners and dating; family is parents, siblings and children; finance is money, property
+  and investments; health is body and mind; education is study for its own sake;
+  spirituality is faith and practice.
 - language: the language the MESSAGE is written in — "en", "hi" (Hindi written in Devanagari
   script) or "hinglish" (Hindi written in Latin script, or Hindi mixed with English).
   Judge by SCRIPT first: any Devanagari is "hi". Romanised Hindi such as "meri shaadi kab
@@ -290,8 +297,14 @@ Resolve relative dates against this: "next year" → {next_year}, "this year" �
 - user_asked_to_remember: true only when the user explicitly asked you to remember it
 - valid_until: YYYY-MM-DD for time-bound facts — an interview "next month" expires at the end
   of next month — else null
-- sensitive_category: none | health_detail (diagnoses, medication) | financial_detail
-  (salary, debts, account numbers) | third_party_sensitive
+- sensitive_category: none | health_detail | financial_detail | third_party_sensitive.
+  Judge the SUBSTANCE, not the wording. health_detail is any diagnosis, symptom, treatment,
+  medication or reproductive detail, however casually put — "my sugar is high", "back on my
+  tablets" and "diabetes" are the same category. financial_detail is any specific figure or
+  instrument: salary, debt, loan amount, account or card number, net worth. "I want to be
+  better with money" is not a financial detail; "I owe 12 lakh" is. third_party_sensitive is
+  either of those about someone who is not the user. Nothing in these categories is stored,
+  so a label you are unsure of should be the cautious one.
 </candidate_fields>
 
 <extract>
@@ -384,6 +397,50 @@ RECONCILE_USER = """<existing_memories>
 <new_candidate>
 {candidate}
 </new_candidate>"""
+
+# ---- memory command ------------------------------------------------------------------
+
+MEMORY_CMD_SYSTEM = """<task>
+The user has given an explicit instruction about your stored memory of them. Decide whether
+they are asking you to STORE something or to DELETE something, and — when deleting — exactly
+which of their stored memories they mean. Return JSON only, no prose.
+</task>
+
+<rules>
+- command is "forget" only for an instruction to delete, drop or stop keeping something you
+  hold. Everything else is "remember".
+- names_a_target says whether the message identifies WHAT to act on. "Forget that" and
+  "forget it" name nothing — they refer to something only the user can see. Set it false and
+  return no ids; a reply will ask which memory they mean. "Forget my job plans" names a
+  target even if nothing in the list matches it.
+- memory_ids: the ids of the listed memories the instruction refers to. Copy them exactly
+  from the list. Never invent an id, and never return one that is not in the list.
+- Match on MEANING, not on shared words. "Forget my job plans" means the career goal.
+  A memory that merely mentions the same word as the instruction is not a match: deleting is
+  not undoable from the user's side, so an uncertain match is no match. Return an empty list
+  and let the reply say nothing matched.
+- forget_all only for an unmistakable instruction to clear everything ("forget everything",
+  "delete all my memories", "sab kuch bhool ja"). A broad topic is not everything.
+- The message may also carry a question. That is not your concern here; decide the memory
+  instruction only.
+</rules>
+
+<output>
+Return a JSON object with exactly these fields:
+- command: "remember" or "forget"
+- names_a_target: true or false
+- memory_ids: array of ids copied from the list (empty for remember, or when nothing matches)
+- forget_all: true or false
+- reason: at most eight words naming the deciding signal
+</output>"""
+
+MEMORY_CMD_USER = """<stored_memories>
+{memories}
+</stored_memories>
+
+<message>
+{message}
+</message>"""
 
 # ---- summarize ----------------------------------------------------------------------
 

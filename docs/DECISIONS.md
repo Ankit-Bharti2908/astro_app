@@ -67,14 +67,42 @@ observed: an impossible clock time silently "repaired" into a plausible one.
 `expected YYYY-MM-DD` into the prompt; the model taught the user the format and invented an example birthday — which
 the next turn read back as the user's own. The prompt now bans example values outright.
 
-### 7. A classifier route is checked against the message
+### 7. No keyword rules anywhere a judgement is being made
 
-`memory_cmd` writes and acknowledges — it cannot answer anything. A question misrouted there is simply lost
-("Noted — I'll remember: 12:30 PM" in reply to a question). So the route is only honoured when the message actually
-contains a remember/forget verb; otherwise it falls back to `answer`.
+A leading verb picked the route, so *"Remove obstacles from my career, what should I do?"* was read as an
+instruction about memory; a word-overlap match then picked the target, and `career` appeared in both. The reply:
+*"Done — I've forgotten: switch jobs."*
 
-The general form: **a prompt states the policy, code supplies the predicate.** Where a prompt rule's condition is
-computable, computing it is not redundancy.
+The repair was not a better word list. The first attempt was one — require a memory-referring object, ban question
+marks — and that is just a longer list with the same blind spot. So every word list that stood for a judgement went:
+routing by leading verb, follow-up and greeting patterns, recall-question patterns, the Hinglish vocabulary, the
+life-area keyword tables, and the health/finance term lists under `never_store`. `app/graphs/rules.py` is deleted.
+The rules they encoded were not wrong; their form was, and they now live in the prompts, where something can weigh
+them against the sentence in front of it.
+
+What stays in code is everything that is not a judgement about meaning:
+
+| Kept | Why it is not a judgement |
+|---|---|
+| A `followup` needs a previous reply | A fact about the turn, not the sentence |
+| No Devanagari ⇒ not written in Devanagari | A fact about the bytes |
+| A forget may touch only ids it was shown | A bound |
+| `validate_profile_patch` | Does this parse as a date, a time, a place |
+| `extract_json`, key slugification, id patterns | Parsing and normalisation |
+
+*Costs, measured rather than assumed:*
+- One small-model call on every turn that used to short-circuit — greetings and follow-ups included.
+- With the classifier down there is no routing at all; everything falls back to `answer`. Nothing user-facing
+  changes, since a degraded turn answers with the same canned reply either way.
+- The model is less reliable than a regex at the one sub-task that was genuinely mechanical: it labelled romanised
+  Hindi `hi` in about one case in four, against a prompt that spells the rule out. That is why the Devanagari check
+  came back — and only that one. Guessing Hinglish from a vocabulary list stays deleted.
+- Of five phrasings that used to delete a memory, four no longer reach `memory_cmd` and the fifth reaches it and is
+  refused by the target step. Which route a borderline sentence takes still varies run to run; the second layer is
+  what makes that safe rather than alarming.
+
+*Related:* decision 6 is the same split stated the other way round. There, code owed a check the prompt could not
+guarantee. Here, code owed bounds and had tried to supply meaning instead.
 
 ### 8. Profile slots are decided by key, never by the extractor's guessed type
 

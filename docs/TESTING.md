@@ -1,7 +1,7 @@
 # Testing and evaluation
 
 ```bash
-pytest -q                      # 45 tests · ~3 s · no API key, no network, no database
+pytest -q                      # 42 tests · ~3 s · no API key, no network, no database
 ruff check app tests eval
 ```
 
@@ -36,8 +36,10 @@ With a provider key set, [`demo.http`](../demo.http) is the live check against r
 | **Degradation** | `test_brain_down_degrades_gracefully` · `test_llm_down_returns_canned_reply_with_degraded_flag` · `test_structured_output_retries_once_then_gives_up` |
 | **Retrieval correctness** | `test_general_bucket_is_never_invisible_to_a_narrowed_recall` · `test_time_bound_memory_expires_from_retrieval` · `test_scoring_and_ranking` |
 | **Memory commands** | `test_memory_cmd_remember_and_forget` · `test_untargeted_forget_never_wipes_the_brain` · `test_a_bare_fact_is_answered_not_merely_acknowledged` |
+| **Deletion safety** | `test_a_question_can_never_delete_a_memory` · `test_a_forget_may_only_touch_memories_it_was_shown` |
 | **Agent loop** | `test_agent_tool_loop_is_bounded` · `test_tool_loop_honours_round_cap_even_if_model_keeps_asking` |
 | **Context budgets** | `test_context_layers_stay_within_budget_and_report_usage` · `test_profile_layer_names_only_the_gaps` |
+| **Routing** | `test_every_turn_asks_the_classifier` · `test_a_followup_needs_something_to_follow_up_on` |
 | **Multilingual** | `test_hinglish_detected_and_memory_stored_in_english` · `test_language_precedence_explicit_then_message_then_profile` |
 | **Session handling** | `test_compaction_summarizes_and_persists_session` · `test_ids_cannot_forge_the_composite_thread_key` |
 | **HTTP layer** | `test_user_api_crud_and_validation` · `test_memory_api_lists_ranked_and_soft_deletes` · `test_health_and_chat_response_shape` · `test_console_page_and_memory_run_trace` |

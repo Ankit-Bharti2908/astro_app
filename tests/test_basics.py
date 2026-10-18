@@ -14,7 +14,7 @@ from app.brain.profile_validation import validate_profile_patch
 from app.brain.repository import apply_profile_patch
 from app.brain.scoring import initial_confidence, initial_importance, is_expired, rank_memories
 from app.context.builder import build_context, profile_layer
-from app.graphs.rules import detect_language, guess_life_areas, rule_route
+from app.graphs.nodes.analyze import honour_route
 from app.llm.provider import LLMMessage, StructuredOutputError, extract_json
 from app.profile.zodiac import sun_sign
 from app.prompts.templates import PROMPT_VERSION
@@ -31,28 +31,25 @@ def mem(i: int, **kw) -> Memory:
     return Memory(**base)
 
 
-@pytest.mark.parametrize(
-    "message,has_history,expected",
-    [
-        ("Why do you say that?", True, "followup"),
-        ("Why do you say that?", False, None),  # nothing to follow up on → the LLM decides
-        ("Remember that I love classical music", False, "memory_cmd"),
-        ("What do you remember about my career goals?", False, "memory_recall"),
-        ("hi", False, "smalltalk"),
-        ("What should I focus on for my career?", False, None),
-    ],
-)
-def test_rule_route(message, has_history, expected):
-    assert rule_route(message, has_history=has_history) == expected
+def test_a_followup_needs_something_to_follow_up_on():
+    """The only check left on the classifier's route, and the only one that is not about
+    meaning: `followup` answers from the previous reply, so with no previous reply there is
+    nothing to answer from. Everything else — greetings, recall questions, memory commands,
+    life areas, Hinglish — was a word list and is now the prompt's job (§4)."""
+    assert honour_route("followup", has_history=False) == "answer"
+    assert honour_route("followup", has_history=True) == "followup"
+    for route in ("answer", "memory_recall", "memory_cmd", "smalltalk"):
+        assert honour_route(route, has_history=False) == route
 
 
-def test_language_detection_and_life_areas():
-    assert detect_language("What should I focus on for my career?") == "en"
-    assert detect_language("Meri shaadi kab hogi?") == "hinglish"
-    assert detect_language("मेरी शादी कब होगी?") == "hi"
-    assert detect_language("Please reply in Hindi from now on") == "hi"
-    assert guess_life_areas("What should I focus on for my career?") == ["career"]
-    assert set(guess_life_areas("money and my parents")) == {"finance", "family"}
+def test_every_turn_asks_the_classifier(client, fake_llm):
+    """There is no keyword short-circuit any more: a bare greeting is classified by the model
+    exactly like anything else. The rules-first path existed to save this call, and it is what
+    turned "Remove obstacles from my career" into a deletion."""
+    for message in ("hi", "Why do you say that?", "Remember that I love chess", "What do you remember about me?"):
+        before = len(fake_llm.calls_for("analyze"))
+        chat(client, message)
+        assert len(fake_llm.calls_for("analyze")) == before + 1, message
 
 
 def test_scoring_and_ranking():

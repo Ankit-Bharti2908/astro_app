@@ -37,12 +37,6 @@ log = logging.getLogger(__name__)
 
 Action = Literal["ADD", "UPDATE", "SUPERSEDE", "NOOP", "PROFILE", "SKIP"]
 
-_HEALTH_TERMS = re.compile(
-    r"\b(diabetes|cancer|hiv|depression|anxiety disorder|bipolar|schizophrenia|thyroid|asthma|pcos|tumou?r|"
-    r"blood pressure|medication|prescri|diagnos|surgery|pregnan)", re.I
-)
-_FINANCE_TERMS = re.compile(r"(₹|\$|rs\.?\s?\d|\b\d{2,}\s?(k|lakh|lakhs|crore|cr)\b|account number|\bsalary\b|\bdebt\b|\bloan\b.*\d)", re.I)
-
 
 class ExtractionResult(BaseModel):
     candidates: list[MemoryCandidate] = Field(default_factory=list)
@@ -104,13 +98,21 @@ def score_candidates(candidates: list[MemoryCandidate]) -> list[ScoredCandidate]
 
 
 def never_store_reason(c: ScoredCandidate) -> str | None:
+    """Categories that are never written, whatever their score (§7).
+
+    `sensitive_category` is the extractor's own label and the prompt defines it. There used to
+    be a second pass here that searched the candidate for listed terms — `diabetes`, `salary`,
+    a currency symbol — as a backstop under the label. It is gone: a word list recognises only
+    the words on it, so it caught `diabetes` and not `my sugar levels`, while reading like a
+    guarantee that sensitive data cannot be stored. An honest "the model decides this, and the
+    labelled eval measures how well" is worth more than a check that covers a list.
+
+    What is left compares fields rather than scanning text, which is a different kind of rule:
+    a fact about someone else's health or money is not the user's to keep, whatever words it
+    uses to say so.
+    """
     if c.sensitive_category != "none":
         return f"never_store:{c.sensitive_category}"
-    text = f"{c.key} {c.value} {json.dumps(c.attributes)}"
-    if c.life_area == "health" and c.type in ("life_event", "profile_fact") and _HEALTH_TERMS.search(text):
-        return "never_store:health_detail"
-    if _FINANCE_TERMS.search(text) and c.type in ("profile_fact", "life_event"):
-        return "never_store:financial_detail"
     if c.subject == "other" and c.life_area in ("health", "finance"):
         return "never_store:third_party_sensitive"
     return None

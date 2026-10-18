@@ -94,10 +94,15 @@ flowchart TD
 **`load_session`** — loads L0/L1/L2 and resets per-turn state. Neo4j down → `degraded: ["brain_unavailable"]`,
 continue on short-term context.
 
-**`analyze`** — rules first (follow-ups, remember/forget, "what do you remember", greetings), small model with
-structured output otherwise. Also labels the reply language, because standard detectors fail on romanised Hindi.
-A classifier route is then *checked against the message*: `memory_cmd` writes and acknowledges — it cannot answer —
-so a message routed there without an actual remember/forget verb is sent to `answer` instead.
+**`analyze`** — one small-model call per turn returning route, life areas and reply language. There is no keyword
+fast path: the word lists that used to catch greetings, follow-ups and recall questions were the same instrument
+that read "Remove obstacles from my career, what should I do?" as a deletion (§7.6), so the rules they encoded now
+live in `ANALYZE_SYSTEM` where something can weigh them against the sentence.
+
+Two checks stay in code because neither is a judgement about meaning: a `followup` answers from a previous reply, so
+it needs one to exist; and a message containing no Devanagari is not written in Devanagari, whatever the model
+labelled it — the model mislabels romanised Hindi roughly one time in four, and the cost is answering someone in a
+script they may not read.
 
 **`learn`** — the memory graph, in-turn, before any reply node. See §5.
 
@@ -115,7 +120,8 @@ reasoning and execution are traced separately and the round cap lives on the edg
 
 **`followup`** — recent turns and summary only. No retrieval.
 **`memory_recall`** — facts come from Cypher; the LLM only phrases them, so they cannot be hallucinated.
-**`memory_cmd`** — explicit remember/forget, applied in the same turn, then confirmed.
+**`memory_cmd`** — explicit remember/forget, applied in the same turn, then confirmed. Which memories a forget
+refers to is decided by the model from the memories themselves, inside the bound in §7.6.
 **`smalltalk`** — profile card only.
 
 Memories actually used in a reply get `last_used_at` refreshed (§7.4) — except ones this same turn created.
@@ -223,7 +229,8 @@ are edges rather than extra tables; retrieval is a traversal by life area, not a
 
 **Remember:** goals, stable preferences, interests, profile facts, significant life events.
 **Don't:** small talk, questions, passing moods, hypotheticals, facts about other people, anything the assistant
-said, never-store categories (health diagnoses, financial detail, third-party sensitive info).
+said, never-store categories (health diagnoses, financial detail, third-party sensitive info — defined by substance
+in the prompt, not by a term list).
 
 The five profile slots (`name`, `dob`, `tob`, `birth_place`, `preferred_language`) are written to the `User` node, not
 as `Memory` nodes — decided by the **key**, never by the type the extractor guessed.
@@ -286,6 +293,39 @@ Using a memory resets `last_used_at`, so what keeps proving useful stays strong.
 - **Source priority:** explicit correction > direct statement > earlier statement.
 - **Never delete:** superseded memories keep `status: superseded` and a `SUPERSEDES` link from their replacement.
 - A profile correction recomputes derived attributes (zodiac).
+
+---
+
+### 7.6 Deleting a memory
+
+A forget is the one instruction that destroys, so it gets the strictest treatment of the three questions it raises:
+
+| Question | Decided by | Why |
+|---|---|---|
+| Is this an instruction about memory at all? | the classifier | It is a question about meaning |
+| Which stored memories does it refer to? | the model, from the listed memories | Also meaning |
+| Which memories may be touched at all? | code | A bound, which is what code is for |
+
+Both of the first two were once keyword rules, and both were wrong in the same way. The route came from a leading
+verb, so *"Remove obstacles from my career, what should I do?"* read as an instruction about memory; the target was
+then any memory sharing any word with the rest of the sentence, and `career` appeared in both. The reply was
+*"Done — I've forgotten: switch jobs."* Four ordinary phrasings did this; one of them deleted the career memory the
+user had just asked to hear about.
+
+Word overlap is not reference. It cannot be made into reference by tightening the word list, because the thing being
+asked — *which memory do you mean* — is semantic. So the model answers it, having been shown each memory with its id,
+and the rules it is given are about caution: match on meaning rather than shared words, treat an uncertain match as
+no match, and never return an id that was not in the list.
+
+What code keeps is the part that is not a judgement:
+
+- a forget may only touch ids that were in the list it was shown — an invented or borrowed id is dropped, never fetched
+- `forget everything` is a separate flag, not a long list of ids
+- an instruction that names no target at all ("forget that") deletes nothing and asks which memory is meant
+- deletes stay soft (`status: deleted`), so a mistake is recoverable
+
+This is the same division as everywhere else in the system — the model supplies meaning, the code supplies bounds —
+but it is worth stating here because the first attempt got it backwards and tried to compute meaning in code.
 
 ---
 
@@ -390,7 +430,7 @@ Full tree: [README](../README.md#project-layout).
 
 ## 15. Testing
 
-45 tests, no network, keys or database required (scripted LLM + in-memory brain + `InMemorySaver`).
+42 tests, no network, keys or database required (scripted LLM + in-memory brain + `InMemorySaver`).
 The eight required scenarios and what each proves: [TESTING.md](TESTING.md).
 
 ## 16. Evaluation
@@ -414,7 +454,9 @@ Method and caveats: [TESTING.md](TESTING.md#evaluation).
 - **Checkpointer:** Postgres or Redis saver with a TTL on idle sessions.
 - **Geocoding:** `birth_place` is validated for shape, not existence. A real chart needs lat/long, so production
   should geocode and reject what cannot be located.
-- **Cost:** rules-first routing, small model for background work, prefix caching, bounded agent loop.
+- **Cost:** small model for classification and background work, prefix caching, bounded agent loop. Removing the
+  keyword fast path costs one small-model call on turns that used to short-circuit; a cheap classifier or a cache
+  keyed on the message would buy it back without putting word lists on the decision again.
 
 ---
 
