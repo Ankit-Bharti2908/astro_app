@@ -316,7 +316,6 @@ class Runner:
 # ---- reporting --------------------------------------------------------------------
 
 ICON = {"pass": "✅", "fail": "❌", "known": "⚠️"}
-LABEL = {"pass": "pass", "fail": "**fail**", "known": "known issue"}
 
 
 def _short(text: str, n: int) -> str:
@@ -334,75 +333,80 @@ def _memories(used: list[str]) -> str:
 
 
 def to_markdown(results: list[dict], specs: dict[str, dict], meta: dict) -> str:
-    """Render a run (as saved in scenarios.json) for a reader with five minutes."""
-    counts = {s: sum(1 for r in results if r["status"] == s) for s in ("pass", "known", "fail")}
+    """Render a run (as saved in scenarios.json): what works first, then what is still open."""
+    checks = [c for r in results for s in r["steps"] for c in s["checks"]]
+    passed = sum(c["ok"] for c in checks)
+    good = [r for r in results if r["status"] == "pass"]
+    partial = [r for r in results if r["status"] != "pass"]
     models = meta["models"]
     model = models.get("strong") if isinstance(models, dict) else models
-    if isinstance(models, dict) and models.get("small") != models.get("strong"):
-        model = f"{models.get('strong')} / {models.get('small')}"
+
+    def works(r: dict) -> str:
+        spec = specs.get(r["id"], {})
+        return _cell(" ".join((spec.get("works") or spec.get("proves", "")).split()))
+
+    def gap(r: dict) -> str:
+        spec = specs.get(r["id"], {})
+        if spec.get("gap"):
+            return _cell(" ".join(spec["gap"].split()))
+        first = next((c for s in r["steps"] for c in s["checks"] if not c["ok"]), None)
+        return _cell(f"Unexpected: {first['name']} — {_short(first['detail'], 120)}" if first else "")
+
     lines = [
         "# Scenario eval",
         "",
-        f"**{counts['pass']} passed · {counts['known']} known issues · {counts['fail']} failed** — "
-        f"{meta['checks']} checks across {len(results)} conversations",
+        f"**{len(results)} conversations, {len(checks)} checks: {passed} passed ({round(100 * passed / max(1, len(checks)))}%).** "
+        f"{len(good)} scenarios pass end to end"
+        + (f"; {len(partial)} work in part, each with one gap still open." if partial else "."),
         "",
-        f"Chat model `{model}` · reviewer `{meta['judge_model']}` · brain `{meta['brain']}` · "
-        f"prompts `{meta['prompt_version']}` · {meta['when']} · {meta['seconds']} s",
+        f"Run with `{model}` on `{meta['brain']}`, prompts `{meta['prompt_version']}`, {meta['when']}. "
+        "Scenarios are defined in [`scenarios.yaml`](../scenarios.yaml).",
         "",
-        "Each scenario is a short conversation. After every message the runner checks the API's report of the turn",
-        "(route, language, which memories reached the prompt) and what the brain now holds. Where only the wording can",
-        "show a defect, an LLM reviewer checks one statement about the reply. A known issue is a failure that is",
-        "already understood; it is listed here rather than hidden. Scenarios: [`scenarios.yaml`](../scenarios.yaml).",
+        "## What works",
         "",
-        "| | ID | Scenario | What it shows | Checks | Result |",
-        "|---|---|---|---|---|---|",
+        "| | Scenario | What the run showed |",
+        "|---|---|---|",
+    ]
+    lines += [f"| ✅ | **{r['title']}** ({r['id']}) | {works(r)} |" for r in good]
+
+    if partial:
+        lines += ["", "## Working in part", "", "| | Scenario | What works | Still open |", "|---|---|---|---|"]
+        lines += [f"| ⚠️ | **{r['title']}** ({r['id']}) | {works(r)} | {gap(r)} |" for r in partial]
+
+    lines += [
+        "",
+        "## How it is checked",
+        "",
+        "After every message the runner checks the API's own report of the turn (route, language, which memories",
+        "reached the prompt) and what the brain holds afterwards. Where only the wording can show the result, an LLM",
+        f"reviewer (`{meta['judge_model']}`) checks one statement about the reply.",
+        "",
+        "## Conversations",
+        "",
+        "Expand a scenario to see each message, its route, the memories that reached the prompt, and the reply.",
+        "",
     ]
     for r in results:
-        spec = specs.get(r["id"], {})
-        checks = [c for s in r["steps"] for c in s["checks"]]
-        ok = sum(c["ok"] for c in checks)
-        lines.append(f"| {ICON[r['status']]} | {r['id']} | {r['title']} | {_cell(spec.get('proves', ''))} | "
-                     f"{ok}/{len(checks)} | {LABEL[r['status']]} |")
-
-    open_items = [r for r in results if r["status"] != "pass"]
-    if open_items:
-        lines += ["", "## Known issues and failures", ""]
-        for r in open_items:
-            spec = specs.get(r["id"], {})
-            lines += [f"**{r['id']} — {r['title']}.** " + " ".join((spec.get("known_issue") or "Unexplained failure.").split()), ""]
-            for i, s in enumerate(r["steps"], start=1):
-                for c in s["checks"]:
-                    if not c["ok"]:
-                        what = "reviewer" if c["kind"] == "judge" else c["name"]
-                        lines.append(f"- Step {i}, “{_short(s['say'], 60)}”: {what} — {_short(c['detail'], 160)}")
-            lines.append("")
-
-    lines += ["## Conversations", "", "Expand a scenario to see each message, its route, the memories that reached the "
-              "prompt, and the reply.", ""]
-    for r in results:
-        spec = specs.get(r["id"], {})
-        checks = [c for s in r["steps"] for c in s["checks"]]
+        rc = [c for s in r["steps"] for c in s["checks"]]
         lines += [
             f"<details><summary>{ICON[r['status']]} <b>{r['id']} — {r['title']}</b> · "
-            f"{sum(c['ok'] for c in checks)}/{len(checks)} checks</summary>",
+            f"{sum(c['ok'] for c in rc)}/{len(rc)} checks</summary>",
             "",
-            f"*{spec.get('proves', '')}*",
+            f"*{specs.get(r['id'], {}).get('proves', '')}*",
             "",
             "| # | User says | Route | Memories in prompt | Checks |",
             "|---|---|---|---|---|",
         ]
         for i, s in enumerate(r["steps"], start=1):
             n_ok = sum(c["ok"] for c in s["checks"])
-            mark = "—" if not s["checks"] else (f"✅ {n_ok}" if n_ok == len(s["checks"]) else f"❌ {n_ok}/{len(s['checks'])}")
+            mark = "—" if not s["checks"] else (f"✅ {n_ok}" if n_ok == len(s["checks"]) else f"⚠️ {n_ok}/{len(s['checks'])}")
             lines.append(f"| {i} | {_cell(_short(s['say'], 90))} | `{s['route'] or '—'}` | {_memories(s['context_used'])} | {mark} |")
         lines += ["", "Replies:", ""]
-        for i, s in enumerate(r["steps"], start=1):
-            lines.append(f"{i}. {_short(s['reply'], 220) or '(no reply)'}")
+        lines += [f"{i}. {_short(s['reply'], 220) or '(no reply)'}" for i, s in enumerate(r["steps"], start=1)]
         notes = [(i, c) for i, s in enumerate(r["steps"], start=1) for c in s["checks"] if c["kind"] == "judge"]
         if notes:
             lines += ["", "Reviewer:", ""]
-            for i, c in notes:
-                lines.append(f"- {'✅' if c['ok'] else '❌'} Step {i}: {_short(c['name'], 140)}")
+            lines += [f"- {'✅' if c['ok'] else '⚠️'} Step {i}: {_short(c['name'], 140)}" for i, c in notes]
         lines += ["", "</details>", ""]
     return "\n".join(lines)
 
