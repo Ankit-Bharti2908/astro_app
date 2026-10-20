@@ -6,4 +6,3 @@ __pycache__/
 *.egg-info/
 .env
 neo4j-data/
-eval/results/

@@ -1,0 +1,125 @@
+{
+  "backend": "litellm",
+  "items": 30,
+  "storage_decision_by_threshold": {
+    "0.3": {
+      "precision": 0.938,
+      "recall": 1.0,
+      "f1": 0.968,
+      "tp": 15,
+      "fp": 1,
+      "fn": 0,
+      "tn": 14
+    },
+    "0.5": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 15,
+      "fp": 0,
+      "fn": 0,
+      "tn": 15
+    },
+    "0.6": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 15,
+      "fp": 0,
+      "fn": 0,
+      "tn": 15
+    },
+    "0.7": {
+      "precision": 1.0,
+      "recall": 0.867,
+      "f1": 0.929,
+      "tp": 13,
+      "fp": 0,
+      "fn": 2,
+      "tn": 15
+    },
+    "0.9": {
+      "precision": 1.0,
+      "recall": 0.867,
+      "f1": 0.929,
+      "tp": 13,
+      "fp": 0,
+      "fn": 2,
+      "tn": 15
+    }
+  },
+  "default_threshold": "0.6",
+  "label_accuracy_on_expected_candidates": {
+    "certainty": 1.0,
+    "subject": 1.0,
+    "type": 0.933
+  },
+  "candidate_extraction": {
+    "expected": 23,
+    "missed": [
+      [
+        7,
+        "relocation"
+      ],
+      [
+        8,
+        "career_change"
+      ],
+      [
+        9,
+        "classical_music"
+      ],
+      [
+        10,
+        "morning_meetings"
+      ],
+      [
+        12,
+        "health_diabetes"
+      ],
+      [
+        13,
+        "income_detail"
+      ],
+      [
+        21,
+        "trekking_in_the_himalayas"
+      ],
+      [
+        23,
+        "evening_consultations"
+      ]
+    ],
+    "unexpected": [
+      [
+        9,
+        "music_preference"
+      ],
+      [
+        10,
+        "meeting_time_preference"
+      ],
+      [
+        12,
+        "health_condition"
+      ],
+      [
+        13,
+        "financial_detail"
+      ],
+      [
+        21,
+        "outdoor_activity"
+      ],
+      [
+        22,
+        "business_startup"
+      ],
+      [
+        23,
+        "meeting_time_preference"
+      ]
+    ]
+  },
+  "errors": []
+}

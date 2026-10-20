@@ -21,6 +21,8 @@ TASK_TIERS: dict[str, str] = {
     "summarize": "small",
     "memory_cmd": "small",
     "memory_cmd_select": "small",
+    # The scenario eval's reviewer (§16): a strong model, because it is judging prose.
+    "judge": "strong",
     "smalltalk": "small",
     "answer": "strong",
     "memory_recall": "strong",
@@ -31,7 +33,7 @@ TASK_TIERS: dict[str, str] = {
 # `llm_temperature_structured` (0 by default) so routing and reconciliation are reproducible:
 # at the provider default of 1.0 the same correction would sometimes ADD and sometimes
 # SUPERSEDE, and the same opening message would sometimes misroute.
-STRUCTURED_TASKS: frozenset[str] = frozenset({"analyze", "extract", "reconcile", "summarize", "memory_cmd_select"})
+STRUCTURED_TASKS: frozenset[str] = frozenset({"analyze", "extract", "reconcile", "summarize", "memory_cmd_select", "judge"})
 
 Role = Literal["system", "user", "assistant", "tool"]
 

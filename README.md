@@ -144,7 +144,7 @@ app/
 ├── prompts/templates.py    # versioned prompts (PROMPT_VERSION recorded on every memory)
 └── static/index.html       # the orchestration console served at /ui
 tests/                      # see below
-eval/                       # labelled set + storage-accuracy / threshold-sweep script
+eval/                       # labelled set · storage-accuracy sweep · scenarios.yaml + runner
 docs/                       # ARCHITECTURE · DECISIONS · API · TESTING
 docker-compose.yml · Dockerfile · demo.http
 ```
@@ -154,7 +154,8 @@ docker-compose.yml · Dockerfile · demo.http
 ```bash
 pytest -q                   # 42 tests, no network, no keys, no database needed: ~3 s
 ruff check app tests eval
-python -m eval.run_eval     # memory-accuracy eval (needs a provider key)
+python -m eval.run_eval          # memory-accuracy eval (needs a provider key)
+python -m eval.run_scenarios     # 10 multi-turn journeys against a running API, LLM-reviewed
 ```
 
 | Where | What it covers |

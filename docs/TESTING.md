@@ -48,6 +48,43 @@ With a provider key set, [`demo.http`](../demo.http) is the live check against r
 
 ## Evaluation
 
+### Scenario eval — does the brain hold up over a conversation?
+
+```bash
+uvicorn app.main:app                      # scenarios run against a live API
+python -m eval.run_scenarios              # 10 journeys, ~70 checks, ~3 min
+python -m eval.run_scenarios --only B07,B08 --no-judge
+```
+
+Ten multi-turn journeys in [`eval/scenarios.yaml`](../eval/scenarios.yaml), each a short
+conversation with a point to prove. Every step is checked twice:
+
+- **Structurally**, against the API's own report of the turn — route, language, which memories
+  reached the prompt — and the Shared Brain afterwards. Exact, and not arguable.
+- **By a reviewer**, which reads the reply and answers one statement about it. This is what the
+  unit tests cannot reach: *"two contradictory goals are active"* is a graph state, while *"the
+  assistant told me I'm both switching jobs and not switching jobs"* is the defect the user
+  meets. Only prose carries it.
+
+A scenario whose failure is already understood carries a `known_issue` naming the mechanism, and
+is reported apart from a regression rather than quietly passing. The latest run — results in
+[`eval/results/scenarios.md`](../eval/results/scenarios.md) — is 6 passing and 4 known issues:
+
+| | What it found |
+|---|---|
+| B01 | A hedged retraction (*"I might not switch after all"*) scores exactly at the 0.6 threshold and is usually dropped, so the next reply speaks from the unretracted goal |
+| B04 | The extractor names the same slot `business_startup` and then `start_business`, and reconcile matches on the key, so one plan becomes two memories |
+| B07 | A fabricated "SYSTEM OVERRIDE" line is routed to `smalltalk`, which carries no memory context — so the reply denies holding memories it is holding |
+| B08 | Never-store keeps a diagnosis out of the **graph**, but the same session's transcript carries it into the **prompt**, and `memory_recall` recites it back under a "Health:" heading |
+
+Two cautions the runs themselves taught. **Routes vary between runs** now that routing is a
+model's judgement — `"What should I be preparing for?"` is `answer` or `followup` depending on
+the day, and both are defensible, so asserting a route is only worth it where one answer is
+genuinely wrong. And **the reviewer is a weak judge**: it twice marked a correct reply wrong by
+importing criteria the statement never mentioned, and by miscomputing "next year". Both were
+fixed by narrowing its instructions, which is a warning about how much weight an LLM judge can
+carry rather than a fix for the general problem.
+
 ### What ships: memory accuracy
 
 ```bash
