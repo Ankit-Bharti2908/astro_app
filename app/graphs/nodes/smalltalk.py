@@ -1,4 +1,4 @@
-"""smalltalk: profile card only, no retrieval (§4)."""
+"""smalltalk: profile card only, no retrieval."""
 
 from __future__ import annotations
 

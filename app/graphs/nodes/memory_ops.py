@@ -1,4 +1,4 @@
-"""Memory pipeline primitives shared by the memory graph and the synchronous `memory_cmd` node (§5, §7)."""
+"""Memory pipeline primitives shared by the memory graph and the synchronous `memory_cmd` node."""
 
 from __future__ import annotations
 
@@ -98,18 +98,9 @@ def score_candidates(candidates: list[MemoryCandidate]) -> list[ScoredCandidate]
 
 
 def never_store_reason(c: ScoredCandidate) -> str | None:
-    """Categories that are never written, whatever their score (§7).
+    """Never store sensitive categories (the extractor's label), or anyone else's health or money.
 
-    `sensitive_category` is the extractor's own label and the prompt defines it. There used to
-    be a second pass here that searched the candidate for listed terms — `diabetes`, `salary`,
-    a currency symbol — as a backstop under the label. It is gone: a word list recognises only
-    the words on it, so it caught `diabetes` and not `my sugar levels`, while reading like a
-    guarantee that sensitive data cannot be stored. An honest "the model decides this, and the
-    labelled eval measures how well" is worth more than a check that covers a list.
-
-    What is left compares fields rather than scanning text, which is a different kind of rule:
-    a fact about someone else's health or money is not the user's to keep, whatever words it
-    uses to say so.
+    There is deliberately no keyword backstop: a term list catches `diabetes` but not "my sugar is high".
     """
     if c.sensitive_category != "none":
         return f"never_store:{c.sensitive_category}"
@@ -205,11 +196,8 @@ def _candidate_json(c: ScoredCandidate) -> str:
 async def reconcile_candidate(
     llm: LLMProvider, repo: BrainRepository, *, user_id: str, candidate: ScoredCandidate
 ) -> dict[str, Any]:
-    """Rules first; the LLM arbitrates multi-valued ambiguity and cross-key conflicts (§7.5)."""
-    # The slot decides this, not the type the extractor guessed. Observed: the same
-    # `birth_place` arrived as `life_event` in one turn and `profile_fact` in the next, so one
-    # became a Memory node and the other a User field — and the Memory branch never meets
-    # validate_profile_patch, which is how an impossible `tob` reached the graph (§7.5, §11).
+    """Rules first; the LLM arbitrates multi-valued ambiguity and cross-key conflicts."""
+    # Birth-detail slots are decided by key, never by the type the extractor guessed.
     if candidate.key in PROFILE_KEYS:
         return {"action": "PROFILE", "target_memory_id": None, "reason": "profile slot"}
 
@@ -218,7 +206,7 @@ async def reconcile_candidate(
     def same(m: Memory) -> bool:
         return m.value.strip().lower() == candidate.value.strip().lower() and m.attributes == candidate.attributes
 
-    # deterministic rules apply within the slot only (§7.5)
+    # deterministic rules apply within the slot only
     for m in same_key:
         if same(m):
             return {"action": "NOOP", "target_memory_id": m.id, "reason": "duplicate → reinforce"}
@@ -227,9 +215,8 @@ async def reconcile_candidate(
         latest = max(same_key, key=lambda m: m.created_at)
         return {"action": "SUPERSEDE", "target_memory_id": latest.id, "reason": "single-valued slot changed"}
 
-    # A correction often arrives under a *different* key ("start_own_business" replacing
-    # "career_change"), so the LLM also sees recent same-life-area memories of a type that
-    # can be retired. Without this the conflict is invisible and we always ADD.
+    # Corrections often use a different key ("start_own_business" vs "career_change"),
+    # so also show recent goals and life events from the same life area.
     existing = list(same_key)
     if candidate.type in _CONFLICTABLE_TYPES and candidate.life_area != "general":
         related = await repo.list_memories(
@@ -252,7 +239,7 @@ async def reconcile_candidate(
             ],
             ReconcileDecision,
         )
-    except Exception as exc:  # structured failure after retry → skip (§9)
+    except Exception as exc:  # structured failure after retry → skip
         log.warning("reconcile LLM failed for key=%s: %s", candidate.key, exc)
         return {"action": "SKIP", "target_memory_id": None, "reason": f"reconcile_failed:{type(exc).__name__}"}
 
@@ -296,7 +283,7 @@ async def apply_decision(
 
     if action == "PROFILE":
         patch, rejected = _profile_patch(candidate, today=now.date())
-        if rejected:  # inadmissible value: refuse it loudly rather than storing a guess (§11)
+        if rejected:  # inadmissible value: refuse it loudly rather than storing a guess
             result.update(action="SKIP", reason=rejected[candidate.key])
             return result
         if patch:

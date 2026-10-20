@@ -1,4 +1,4 @@
-"""Assembles the bounded prompt layers (§3) and converts LangChain messages for the provider."""
+"""Assembles the bounded prompt layers and converts LangChain messages for the provider."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class ContextBundle:
 
 # ---- layers -----------------------------------------------------------------
 
-def meta_layer(now: datetime, tz: str, language: str) -> str:  # L0
+def meta_layer(now: datetime, tz: str, language: str) -> str:  # date, timezone, reply language
     try:
         local = now.astimezone(ZoneInfo(tz))
     except Exception:  # unknown tz → keep UTC
@@ -39,7 +39,7 @@ def meta_layer(now: datetime, tz: str, language: str) -> str:  # L0
     )
 
 
-def profile_layer(profile: UserProfile | None, budget: int) -> str:  # L1
+def profile_layer(profile: UserProfile | None, budget: int) -> str:  # profile
     if profile is None:
         return "## User profile\nUnknown user: no birth details on file."
     rows = [
@@ -51,7 +51,7 @@ def profile_layer(profile: UserProfile | None, budget: int) -> str:  # L1
         f"Preferred language: {profile.preferred_language or 'unknown'}",
     ]
     # Name the gaps instead of leaving the model to diff six rows for "unknown": re-asking for
-    # a detail already on file is what makes a brain feel like it forgot (§3).
+    # a detail already on file is what makes a brain feel like it forgot.
     missing = [
         label
         for label, value in (("date of birth", profile.dob), ("time of birth", profile.tob), ("place of birth", profile.birth_place))
@@ -69,20 +69,15 @@ SLOT_LABELS = {
 }
 
 
-def refusals_layer(refused: dict[str, str], budget: int) -> str:  # L1b
-    """What this turn's message offered and the store would not take.
-
-    Without it the profile shows only `unknown`, which reads identically whether the user
-    never said anything or said something impossible — so the model fills the gap from the
-    transcript and restates the impossible value as fact (§11).
-    """
+def refusals_layer(refused: dict[str, str], budget: int) -> str:  # refused profile values
+    """Profile values from this message that were refused, so the reply asks again instead of repeating them."""
     if not refused:
         return ""
     lines = [f"- {SLOT_LABELS.get(k, k)}: {v}" for k, v in refused.items()]
     return truncate_to_budget("## Refused from this message (not stored)\n" + "\n".join(lines), budget)
 
 
-def index_layer(index: dict[str, dict[str, int]], budget: int) -> str:  # L2
+def index_layer(index: dict[str, dict[str, int]], budget: int) -> str:  # memory summary
     if not index:
         return "## Memory index\n(no long-term memories yet)"
     parts = []
@@ -93,7 +88,7 @@ def index_layer(index: dict[str, dict[str, int]], budget: int) -> str:  # L2
     return truncate_to_budget("## Memory index (what I know exists)\n" + " · ".join(parts), budget)
 
 
-def memories_layer(memories: list[Memory], budget: int) -> tuple[str, list[Memory]]:  # L3
+def memories_layer(memories: list[Memory], budget: int) -> tuple[str, list[Memory]]:  # relevant memories
     if not memories:
         return "", []
     header = "## Known memories (ranked)\n"
@@ -191,7 +186,7 @@ def build_context(
     st_summary = summary_layer(summary, settings.budget_summary)
     turns, turns_tokens = turns_layer(messages, settings.budget_turns)
 
-    # stable layers first (prefix caching), volatile L0 last
+    # stable layers first (prefix caching), the date block last
     blocks = [SYSTEM_BASE]
     if extra_system:
         blocks.append(extra_system)

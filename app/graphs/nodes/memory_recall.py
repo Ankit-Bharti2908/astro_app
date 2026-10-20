@@ -1,4 +1,4 @@
-"""memory_recall: facts come from Neo4j; the LLM only phrases them (§4)."""
+"""memory_recall: facts come from Neo4j; the LLM only phrases them."""
 
 from __future__ import annotations
 

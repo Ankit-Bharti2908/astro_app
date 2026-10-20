@@ -21,16 +21,9 @@ GENERAL_AREA = "general"
 
 
 def recall_areas(life_areas: Sequence[str] | None) -> list[str] | None:
-    """Widen a life-area-narrowed read with the catch-all bucket.
+    """Add the `general` area to a narrowed read, so a misfiled memory is never invisible.
 
-    `general` is where extraction files anything it could not confidently place. A read that
-    matches the area exactly therefore turns every misfiling into permanent amnesia: the brain
-    answers "I have nothing on that" while the fact sits one bucket away, and no later turn can
-    ever reach it. Narrowing is an optimisation, so it may only ever drop memories that are
-    definitely about something else — and `general` never is (§7).
-
-    Read paths that narrow use this; the REST filter stays exact, since there the caller asked
-    for one specific bucket.
+    The REST filter stays exact: there the caller asked for one specific area.
     """
     if not life_areas:
         return None
@@ -61,7 +54,7 @@ RELATIONSHIP_BY_TYPE: dict[str, str] = {
 
 
 class MemoryCandidate(BaseModel):
-    """What the extraction LLM emits (§7.1): observable features, no numeric scores."""
+    """What the extraction LLM emits: observable features, no numeric scores."""
 
     type: MemoryType
     key: str = Field(description="canonical slot, e.g. career_change")
@@ -109,12 +102,12 @@ class Memory(BaseModel):
     created_at: datetime
     updated_at: datetime
     session_id: str | None = None
-    prompt_version: str | None = None  # provenance: extraction prompt version (§17)
+    prompt_version: str | None = None  # provenance: extraction prompt version
     supersedes: str | None = None  # id of the memory this one replaced
     superseded_by: str | None = None
 
     def as_line(self) -> str:
-        """Compact one-line serialization used in prompts (§3)."""
+        """Compact one-line serialization used in prompts."""
         extras = []
         for k, v in sorted(self.attributes.items()):
             extras.append(f"{k.replace('_', ' ')} {v}")

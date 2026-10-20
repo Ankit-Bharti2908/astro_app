@@ -1,4 +1,4 @@
-"""LiteLLM Router-backed provider: task-based routing, retries and provider fallback (§9)."""
+"""LiteLLM Router-backed provider: task-based routing, retries and provider fallback."""
 
 from __future__ import annotations
 

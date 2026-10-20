@@ -1,4 +1,4 @@
-"""answer_agent: deterministic L3 prefetch + strong model + bounded read-only tool loop (§4)."""
+"""answer_agent: fetch relevant memories, call the strong model, allow at most two rounds of read-only tools."""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ def make_answer_agent(deps: Deps):
         recalled = [m for m in memory_ids if m not in fresh]  # this turn's own writes are not recall
         if recalled and not brain_down and not state.get("ephemeral"):  # a temporary chat mutates nothing
             try:
-                await deps.repo.touch_used(state["user_id"], recalled, now=now)  # §7.4 reinforcement
+                await deps.repo.touch_used(state["user_id"], recalled, now=now)  # reinforce memories actually used
             except BrainUnavailable:
                 degraded.append("brain_unavailable")
         return final_reply(

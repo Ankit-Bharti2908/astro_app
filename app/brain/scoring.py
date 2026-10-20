@@ -1,4 +1,4 @@
-"""Rule-based confidence, importance, decay and retrieval scoring (§7.2–7.4)."""
+"""Rule-based confidence, importance, decay and retrieval scoring."""
 
 from __future__ import annotations
 

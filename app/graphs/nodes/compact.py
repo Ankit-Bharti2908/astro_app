@@ -1,4 +1,4 @@
-"""maybe_compact: incremental summarization of older turns + session persistence (§8)."""
+"""maybe_compact: incremental summarization of older turns + session persistence."""
 
 from __future__ import annotations
 

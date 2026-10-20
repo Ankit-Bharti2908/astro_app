@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "neo4j"
     neo4j_database: str = "neo4j"
-    # Fail fast so an outage becomes a degraded reply rather than a 30 s stall (§11)
+    # Fail fast so an outage becomes a degraded reply rather than a 30 s stall
     neo4j_connect_timeout_s: float = 3.0
     neo4j_max_retry_time_s: float = 5.0
 
@@ -37,23 +37,22 @@ class Settings(BaseSettings):
     checkpointer: Literal["memory", "postgres"] = "memory"
     checkpointer_url: str = ""
 
-    # Context budgets (tokens) — §3. L0 has none: it is a fixed sentence we generate, so
-    # there is nothing for a budget to protect against.
+    # Context budgets (tokens). The date/language line needs none: it is a fixed sentence.
     budget_profile: int = 150
     budget_index: int = 100
     budget_memories: int = 600
     budget_summary: int = 300
     budget_turns: int = 1200
 
-    # Compaction — §8
+    # Compaction
     compact_threshold_tokens: int = 1200
     keep_last_messages: int = 6
 
-    # Agent loop — §4
+    # Agent loop
     max_tool_rounds: int = 2
     recursion_limit: int = 25
 
-    # Memory strategy — §7
+    # Memory strategy
     confidence_threshold: float = 0.6
     top_k_memories: int = 5
 

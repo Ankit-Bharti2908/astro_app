@@ -1,4 +1,4 @@
-"""§15 scenarios 1–12 plus the §13 walkthrough, all with FakeLLM + in-memory brain + MemorySaver."""
+"""End-to-end chat scenarios, all with FakeLLM + in-memory brain + MemorySaver."""
 
 from __future__ import annotations
 
@@ -209,7 +209,7 @@ def test_tool_loop_honours_round_cap_even_if_model_keeps_asking(client, fake_llm
     assert d["response"]  # fallback text, never an empty reply
 
 
-# ---- beyond the 12: walkthrough extras ---------------------------------------
+# ---- beyond the required scenarios ----------------------------------------
 
 def test_time_bound_memory_expires_from_retrieval(client, repo):
     chat(client, "I have a PM interview next month.")
@@ -276,7 +276,7 @@ def test_a_question_can_never_delete_a_memory(client):
 
 def test_a_forget_may_only_touch_memories_it_was_shown(client, fake_llm, repo):
     """The model names the targets, so the ids it names are the bound worth enforcing: one it
-    was never shown is not a memory it may delete (§7.6)."""
+    was never shown is not a memory it may delete."""
     chat(client, "Planning to switch jobs next year.")
     mine = memories(client)[0]["id"]
     fake_llm.script("memory_cmd_select", {
@@ -325,7 +325,7 @@ def test_llm_down_returns_canned_reply_with_degraded_flag(client, fake_llm, app)
     assert run["skipped_reason"] == "extraction_failed" and memories(client) == []
     # With the classifier down there is no routing left — every turn falls back to `answer`.
     # Nothing user-facing changes: both routes answer through the same canned reply, and the
-    # alternative was a keyword table that routed questions into a delete (§4).
+    # alternative was a keyword table that routed questions into a delete.
     d = chat(client, "Why?")
     assert d["route"] == "answer" and d["degraded"] == ["llm_unavailable"]
     assert "trouble reaching" in d["response"]
@@ -385,7 +385,7 @@ def test_the_write_is_durable_before_the_reply_returns(client, app):
 def test_a_refused_birth_detail_is_told_to_the_reply(client, app, repo):
     """A refusal is produced by the write path and was dying there. The reply has to know:
     "unknown" and "you gave me something unusable" are different states, and only the second
-    one has anything to say back (§11)."""
+    one has anything to say back."""
     d = chat(client, "I was born on 65 May 2200 in Delhi")
     written = app.state.container.memory_runs[-1]["result"]["written"]
     assert ("SKIP", "dob") in [(w["action"], w["key"]) for w in written]

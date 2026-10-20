@@ -1,4 +1,4 @@
-"""Request/response schemas (§12)."""
+"""Request/response schemas."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 Language = Literal["en", "hi", "hinglish"]
 # ':' separates the two halves of the checkpointer thread key `user_id:session_id`, so an id
-# containing one could address another user's thread. Barred from both halves (§11).
+# containing one could address another user's thread. Barred from both halves.
 ID_PATTERN = r"^[A-Za-z0-9_.@-]+$"
 
 
@@ -83,7 +83,7 @@ class ChatRequest(BaseModel):
 
 
 class ToolCallOut(BaseModel):
-    """One agent tool call made while answering this turn (§4)."""
+    """One agent tool call made while answering this turn."""
 
     name: str
     args: dict[str, Any]
@@ -111,7 +111,7 @@ class HealthOut(BaseModel):
 
 
 class MemoryRunOut(BaseModel):
-    """One background memory-graph run: what the pipeline made of a turn (§5, §7)."""
+    """One background memory-graph run: what the pipeline made of a turn."""
 
     seq: int
     user_id: str

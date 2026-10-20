@@ -1,12 +1,6 @@
-"""Admissibility of the five profile slots (§11, invalid input).
+"""Validation for the five profile slots. Rejects impossible values rather than repairing them.
 
-Birth details reach the User node two ways — the typed `/users` API and free text the
-extractor turns into a PROFILE write — and neither is trustworthy. The prompt asks the
-model to refuse an unusable value and mostly it does, but a prompt is a request, not a
-guarantee: observed failures include an impossible clock time being "repaired" into a
-plausible one. The chart is computed from these three fields, so a wrong value is worse
-than a missing one — it yields a confident reading of a moment that never happened.
-These checks are deterministic, run on both paths, and reject rather than repair.
+Runs on both write paths (the /users API and chat), because a prompt is a request, not a guarantee.
 """
 
 from __future__ import annotations
@@ -16,9 +10,7 @@ from datetime import date
 from typing import Any
 
 MIN_BIRTH_YEAR = 1900
-# A chart needs a latitude and longitude, so a "place" that cannot be located on Earth is
-# unusable rather than merely odd. Geocoding is the production answer (§17); this catches
-# what is obvious without a network call.
+# Obvious non-places, caught without a network call. Production should geocode instead.
 NON_EARTH_PLACES = frozenset(
     {"mars", "moon", "jupiter", "venus", "saturn", "mercury", "neptune", "uranus", "pluto",
      "sun", "earth", "space", "heaven", "nowhere", "unknown", "n/a", "none", "somewhere"}

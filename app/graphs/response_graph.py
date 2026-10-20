@@ -1,4 +1,4 @@
-"""Response graph (§4): load_session → analyze → learn → route → … → maybe_compact."""
+"""Response graph: load_session → analyze → learn → route → … → maybe_compact."""
 
 from __future__ import annotations
 

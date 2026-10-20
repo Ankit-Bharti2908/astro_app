@@ -1,5 +1,5 @@
-"""Memory-accuracy eval (§16): storage-decision precision/recall and label accuracy on the labelled set,
-plus a confidence-threshold sweep that validates the 0.6 storage threshold (§7.2).
+"""Memory-accuracy eval : storage-decision precision/recall and label accuracy on the labelled set,
+plus a confidence-threshold sweep that validates the 0.6 storage threshold.
 
     python -m eval.run_eval                          # runs the real extraction model (needs provider keys)
 """

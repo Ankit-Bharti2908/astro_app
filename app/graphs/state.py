@@ -36,7 +36,7 @@ class ChatState(TypedDict, total=False):
     context_used: list[str]
     context_tokens: dict[str, int]
     memory_ids_used: list[str]
-    tool_trace: list[dict[str, Any]]  # this turn's tool calls, kept for /chat's response (§4)
+    tool_trace: list[dict[str, Any]]  # this turn's tool calls, kept for /chat's response
     degraded: list[str]
     tool_rounds: int
     response: str

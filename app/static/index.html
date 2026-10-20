@@ -355,7 +355,7 @@ function memoryPanel(turn) {
   if (turn.memState === "skipped-ephemeral")
     return `<div class="hint">Ephemeral turn: the brain was read but the memory graph never ran.</div>`;
   if (turn.memState === "skipped-route")
-    return `<div class="hint">Route <code>${esc(turn.reply.route)}</code> does not write memories (§5).</div>`;
+    return `<div class="hint">Route <code>${esc(turn.reply.route)}</code> does not write memories.</div>`;
   if (turn.memState === "pending")
     return `<div class="hint"><span class="spin"></span> extract → score → filter → reconcile → write …</div>`;
   if (turn.memState === "timeout")

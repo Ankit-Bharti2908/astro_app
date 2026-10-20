@@ -1,4 +1,4 @@
-"""load_session: L0 meta, L1 profile, L2 index; resets per-turn state (§4)."""
+"""load_session: load the profile and memory summary, and reset per-turn state."""
 
 from __future__ import annotations
 

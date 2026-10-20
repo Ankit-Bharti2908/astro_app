@@ -108,7 +108,7 @@ def final_reply(state: ChatState, text: str, *, context_used, context_tokens, me
 
 
 def llm_failure_handler(state: ChatState) -> dict:
-    """error_handler for LLM nodes: canned reply, degraded flag, never a 500 (§11)."""
+    """error_handler for LLM nodes: canned reply, degraded flag, never a 500."""
     language = state.get("language", "en")
     text = pick(CANNED_LLM_UNAVAILABLE, language)
     return final_reply(

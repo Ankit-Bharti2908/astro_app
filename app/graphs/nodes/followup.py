@@ -1,4 +1,4 @@
-"""followup: short-term context only — no Neo4j calls, no memory write (§4)."""
+"""followup: short-term context only — no Neo4j calls, no memory write."""
 
 from __future__ import annotations
 

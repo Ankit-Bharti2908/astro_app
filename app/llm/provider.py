@@ -1,4 +1,4 @@
-"""LLMProvider protocol, message/tool types and the shared structured-output logic (§9)."""
+"""LLMProvider protocol, message/tool types and the shared structured-output logic."""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ from pydantic import BaseModel, ValidationError
 
 log = logging.getLogger(__name__)
 
-# task → model tier (§9)
+# task → model tier
 TASK_TIERS: dict[str, str] = {
     "analyze": "small",
     "extract": "small",
     "reconcile": "small",
     "summarize": "small",
     "memory_cmd_select": "small",
-    # The scenario eval's reviewer (§16): a strong model, because it is judging prose.
+    # The scenario eval's reviewer: a strong model, because it is judging prose.
     "judge": "strong",
     "smalltalk": "small",
     "answer": "strong",
@@ -28,10 +28,7 @@ TASK_TIERS: dict[str, str] = {
     "followup": "strong",
 }
 
-# Tasks that return a decision or a JSON record rather than prose. These are sampled at
-# `llm_temperature_structured` (0 by default) so routing and reconciliation are reproducible:
-# at the provider default of 1.0 the same correction would sometimes ADD and sometimes
-# SUPERSEDE, and the same opening message would sometimes misroute.
+# Decision tasks run at temperature 0 so the same message is routed and reconciled the same way.
 STRUCTURED_TASKS: frozenset[str] = frozenset({"analyze", "extract", "reconcile", "summarize", "memory_cmd_select", "judge"})
 
 Role = Literal["system", "user", "assistant", "tool"]
@@ -169,7 +166,7 @@ class BaseLLMProvider(ABC):
             except (ValueError, ValidationError) as exc:
                 last_error = exc
                 log.warning("structured output invalid for task=%s attempt=%d: %s", task, attempt, exc)
-                # §9: retry once with the validation error in the prompt
+                # retry once with the validation error in the prompt
                 prompt = [
                     *prompt,
                     LLMMessage("assistant", response.content),

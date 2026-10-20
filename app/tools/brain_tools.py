@@ -1,4 +1,4 @@
-"""Read-only tools the answer agent may request; executed by the `fetch_context` ToolNode (§4)."""
+"""Read-only tools the answer agent may request; executed by the `fetch_context` ToolNode."""
 
 from __future__ import annotations
 

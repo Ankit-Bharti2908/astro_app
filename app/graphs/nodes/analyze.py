@@ -1,17 +1,6 @@
-"""analyze: the small model classifies the turn — route, life areas, reply language (§4, §10).
+"""analyze: one small-model call classifies the turn (route, life areas, reply language).
 
-This node used to try keyword rules first and only fall through to the model. Every one of
-those rules was a word list standing in for a judgement about meaning, and they failed the way
-word lists do: a leading "Remove" made "Remove obstacles from my career, what should I do?" an
-instruction to delete, and the matching list below it then deleted a career memory. The
-patterns for follow-ups, greetings, recall questions, Hinglish and life areas were the same
-shape and wrong for the same reason — "my boss is a nightmare" has no listed career word, and
-"I had a great workout" has one.
-
-The rules themselves were not wrong; their form was. They now live in `ANALYZE_SYSTEM`, where
-they are read by something that can weigh them against the sentence in front of it. What stays
-here is the one thing that is not a judgement about the message: `followup` answers from a
-previous reply, so it cannot be chosen when there is no previous reply.
+No keyword rules: meaning is the model's job (DECISIONS.md, decision 7). Code keeps only facts and limits.
 """
 
 from __future__ import annotations
@@ -31,17 +20,10 @@ from app.prompts.templates import ANALYZE_SYSTEM, ANALYZE_USER
 
 log = logging.getLogger(__name__)
 
-# A greeting carries no language of its own — "hi" is a word in several. Nothing in the
-# message can settle it, so the user's stored preference does (§10).
+# A greeting this short has no language of its own; use the stored preference.
 GREETING_WORDS = 2
 
-# The one survivor of the deleted word lists, and not a word list: whether a string contains
-# characters from the Devanagari block is a fact about the bytes, in the same class as "does
-# this date parse", not a judgement about what the sentence means. It is here because the
-# model gets it wrong often enough to matter — `hi` for romanised Hindi in roughly one case in
-# four, against a prompt that spells the rule out — and the cost is a user who writes
-# "meri shaadi kab hogi" being answered in a script they may not read. The guess that WAS a
-# judgement, deciding Hinglish from a vocabulary list, stays deleted (§10).
+# A byte check, not a judgement: the model labels romanised Hindi as `hi` about one time in four.
 _DEVANAGARI = re.compile(r"[\u0900-\u097f]")
 
 

@@ -1,6 +1,6 @@
 """FakeLLM: deterministic, scriptable LLMProvider used by the test-suite.
 
-Default behaviour per task is rule-based so the §13 walkthrough runs end-to-end with no API key.
+Default behaviour per task is rule-based so the README's example conversation runs end-to-end with no API key.
 Tests can override any call with `script(task, response)` (FIFO per task) or force failures.
 """
 
@@ -100,7 +100,7 @@ _FORGET_VERB = re.compile(r"^(please\s+)?(forget|delete|remove|erase|bhool ja\w*
 
 
 def _route_of(message: str, *, has_history: bool) -> str:
-    """The route a competent classifier would pick — the real one is an LLM (§4).
+    """The route a competent classifier would pick — the real one is an LLM.
 
     `app/` no longer routes by keyword at all, so the stand-in has to make the whole judgement
     or nothing below it is exercised. The memory-command arm is kept crude on purpose: an
@@ -212,7 +212,7 @@ class FakeLLM(BaseLLMProvider):
         return LLMResponse(content=json.dumps(payload))
 
     def _memory_cmd_select(self, system: str, user: str, messages) -> LLMResponse:
-        """Stand-in for the model that reads a memory instruction (§7.6).
+        """Stand-in for the model that reads a memory instruction.
 
         Deliberately conservative in the same direction the prompt asks for: a memory is a
         target only when the instruction names the whole of it, so an instruction that merely

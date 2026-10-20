@@ -123,7 +123,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         try:
             await container.repo.ensure_schema()
-        except Exception as exc:  # noqa: BLE001 — degrade, don't crash (§11)
+        except Exception as exc:  # noqa: BLE001 — degrade, don't crash
             log.warning("could not ensure brain schema at startup: %s", exc)
         yield
         await container.repo.close()

@@ -35,7 +35,7 @@ def test_a_followup_needs_something_to_follow_up_on():
     """The only check left on the classifier's route, and the only one that is not about
     meaning: `followup` answers from the previous reply, so with no previous reply there is
     nothing to answer from. Everything else — greetings, recall questions, memory commands,
-    life areas, Hinglish — was a word list and is now the prompt's job (§4)."""
+    life areas, Hinglish — was a word list and is now the prompt's job."""
     assert honour_route("followup", has_history=False) == "answer"
     assert honour_route("followup", has_history=True) == "followup"
     for route in ("answer", "memory_recall", "memory_cmd", "smalltalk"):

@@ -1,17 +1,6 @@
-"""learn: the turn's memory write, run before the reply instead of after it (§4, §5).
+"""learn: run the memory graph before the reply, so the reply sees what was stored or refused.
 
-The memory graph used to run as a BackgroundTask once the reply had already been sent, which
-left the reply and the store disagreeing about the same sentence in two ways:
-
-- The store refused "65 may 2200" and the reply, which never saw that verdict, restated it as
-  established fact. A refusal computed after the answer cannot inform the answer.
-- The write landed ~2 s after the response returned, so a user who typed again inside that
-  window got a turn whose profile had not caught up — observed, with the model telling them
-  "ye details file mein save nahi hui hain".
-
-Both are the same mistake: two paths deciding independently what the user just said. Learning
-first and answering second gives one verdict, and the reply is built on top of it — the write
-is durable before the response leaves, and whatever was refused is named in the prompt.
+See DECISIONS.md, decision 2, for why this is not a background task.
 """
 
 from __future__ import annotations
@@ -33,7 +22,7 @@ LEARN_ROUTES = frozenset({"answer", "followup", "memory_recall"})
 def make_learn(deps: Deps):
     async def learn(state: ChatState) -> dict:
         if deps.learn is None or state.get("ephemeral") or state.get("route") not in LEARN_ROUTES:
-            return {}  # §12: an ephemeral turn reads the brain and changes nothing
+            return {}  # an ephemeral turn reads the brain and changes nothing
 
         now = parse_now(state, deps.clock)
         result = (
@@ -62,7 +51,7 @@ def make_learn(deps: Deps):
             and w.get("reason") != "brain_unavailable"
         }
         # Ids written this turn, so the reply can use them without also counting them as
-        # "recalled": a memory is not reinforced by the very message that created it (§7.4).
+        # "recalled": a memory is not reinforced by the very message that created it.
         out: dict = {
             "refused_details": refused,
             "written_this_turn": [w["memory_id"] for w in result.get("written", []) if w.get("memory_id")],

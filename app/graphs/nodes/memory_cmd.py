@@ -1,4 +1,4 @@
-"""memory_cmd: explicit remember/forget executed synchronously in the turn (§4, §7.6)."""
+"""memory_cmd: explicit remember/forget executed synchronously in the turn."""
 
 from __future__ import annotations
 
@@ -57,14 +57,7 @@ def _memories_json(memories: list[Memory]) -> str:
 async def read_command(
     llm: LLMProvider, *, message: str, memories: list[Memory], context: str
 ) -> MemoryCommand:
-    """Which memories the instruction refers to, decided from the memories themselves.
-
-    This used to be a regex: strip a leading verb, split what remained into words, delete every
-    memory containing any one of them. Word overlap is not reference — "Remove obstacles from my
-    career, what should I do?" deleted a career goal, because `career` appeared in both. Which
-    memory someone means is a question about meaning, so the model answers it; what the code
-    keeps is the bound below, that only ids we listed can be touched (§7.6).
-    """
+    """Ask the model which listed memories the instruction means. Matching is by meaning, not shared words."""
     return await llm.structured(
         "memory_cmd_select",
         [
@@ -105,13 +98,13 @@ def make_memory_cmd(deps: Deps):
 
         try:
             plan = await read_command(deps.llm, message=message, memories=memories, context=previous_assistant_text(state))
-        except LLMError as exc:  # no verdict → do nothing, least of all delete (§9)
+        except LLMError as exc:  # no verdict → do nothing, least of all delete
             log.warning("memory_cmd selection failed: %s", exc)
             out = final_reply(state, pick(MEMORY_FORGET_WHAT, language), context_used=[], context_tokens={}, degraded=["llm_unavailable"])
             out["memory_cmd_result"] = {"command": "unknown", "deleted": [], "keys": [], "reason": "selection_failed"}
             return out
 
-        if ephemeral:  # §12: a temporary chat may read the brain and change nothing
+        if ephemeral:  # a temporary chat may read the brain and change nothing
             out = final_reply(state, pick(MEMORY_EPHEMERAL, language), context_used=[], context_tokens={})
             out["memory_cmd_result"] = {"command": plan.command, "stored": [], "deleted": [], "reason": "ephemeral"}
             return out

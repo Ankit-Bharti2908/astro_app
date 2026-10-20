@@ -1,4 +1,4 @@
-"""HTTP endpoints (§12)."""
+"""HTTP endpoints."""
 
 from __future__ import annotations
 
@@ -139,7 +139,7 @@ async def chat(body: ChatRequest, request: Request):
         "recursion_limit": c.settings.recursion_limit,
     }
     # The `learn` node inside the graph runs the memory write before the reply is composed,
-    # so by the time this returns the write is durable and the reply already reflects it (§5).
+    # so by the time this returns the write is durable and the reply already reflects it.
     state = await c.response_graph.ainvoke(inputs, config=config)
 
     route = state.get("route") or "answer"
@@ -158,7 +158,7 @@ async def chat(body: ChatRequest, request: Request):
 
 
 def _tools_used(state: dict[str, Any]) -> list[ToolCallOut]:
-    """This turn's agent tool calls, recorded by the agent node before the transcript is trimmed (§4)."""
+    """This turn's agent tool calls, recorded by the agent node before the transcript is trimmed."""
     return [ToolCallOut(**t) for t in state.get("tool_trace", [])]
 
 
@@ -172,7 +172,7 @@ async def memory_runs(
     since: int = Query(default=0, ge=0, description="only runs with seq > since"),
 ):
     """What the memory graph did, per turn: extracted candidates, what the filter
-    dropped, the reconcile decision per candidate and what was written (§5). Observability for
+    dropped, the reconcile decision per candidate and what was written. Observability for
     the UI and for debugging — the writes themselves are visible via /users/{user_id}/memories."""
     c = _container(request)
     out: list[MemoryRunOut] = []

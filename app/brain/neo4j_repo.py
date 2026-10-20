@@ -1,4 +1,4 @@
-"""Neo4j implementation of the BrainRepository (§6 schema)."""
+"""Neo4j implementation of the BrainRepository."""
 
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ class Neo4jBrainRepository:
         max_retry_time_s: float = 5.0,
     ) -> None:
         auth = (user, password) if user else None
-        # Fail fast so an outage becomes `degraded: ["brain_unavailable"]` instead of a 30 s+ stall (§11)
+        # Fail fast so an outage becomes `degraded: ["brain_unavailable"]` instead of a 30 s+ stall
         self._driver: AsyncDriver = AsyncGraphDatabase.driver(
             uri,
             auth=auth,

@@ -1,4 +1,4 @@
-### MyNaksh Shared Brain — replays the §13 walkthrough (VS Code "REST Client" / JetBrains HTTP client)
+### MyNaksh Shared Brain — replays the example conversation from the brief (VS Code "REST Client" / JetBrains HTTP client)
 @host = http://localhost:8000
 @user = user-123
 

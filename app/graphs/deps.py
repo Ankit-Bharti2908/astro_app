@@ -25,5 +25,5 @@ class Deps:
     llm: LLMProvider
     clock: Callable[[], datetime] = utc_now
     tools: list[BaseTool] = field(default_factory=list)
-    # Bound once the memory graph exists; the `learn` node runs it inside the turn (§5).
+    # Bound once the memory graph exists; the `learn` node runs it inside the turn.
     learn: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]] | None = None

@@ -1,15 +1,6 @@
-"""Versioned prompt templates (§3, §4, §7).
+"""Versioned prompt templates. All prompts are XML-tagged and English-only; the reply language is an instruction.
 
-All model-facing prompts are XML-structured: tags delimit instruction sections so each
-section can be attended to — and revised — independently. Prompt text is English only,
-whatever language the user writes in; the reply language is an instruction (`<language>`),
-not a translated prompt. Canned strings below are the no-LLM fallbacks and are English too.
-
-Formatting contract: templates interpolated with `.format()` (EXTRACT_SYSTEM, *_USER) must
-double every literal brace; templates passed to the model verbatim (SYSTEM_*, ANALYZE_SYSTEM,
-RECONCILE_SYSTEM) use single braces.
-
-Bump PROMPT_VERSION when any template changes.
+Templates filled with `.format()` (EXTRACT_SYSTEM, *_USER) must double literal braces. Bump PROMPT_VERSION on any change.
 """
 
 PROMPT_VERSION = "v6"
@@ -487,10 +478,5 @@ MEMORY_BRAIN_DOWN = "My long-term memory is unavailable right now, so I couldn't
 
 
 def pick(template: str, language: str | None = None, **kwargs) -> str:
-    """Render a canned reply.
-
-    Canned replies are English-only (they fire when no model is available to translate),
-    so `language` is accepted for call-site symmetry with the rest of the reply path and
-    deliberately ignored.
-    """
+    """Render a canned reply. Always English: these fire when no model is available to translate."""
     return template.format(**kwargs)

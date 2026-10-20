@@ -65,7 +65,7 @@ def apply_profile_patch(profile: UserProfile, patch: dict[str, Any], now: dateti
     from app.profile.zodiac import sun_sign
 
     data = profile.model_dump()
-    # Nothing unparseable may reach the User node: the chart is computed from it (§11).
+    # Nothing unparseable may reach the User node: the chart is computed from it.
     clean, _rejected = validate_profile_patch(patch, today=now.date())
     data.update(clean)
     updated = UserProfile(**data)

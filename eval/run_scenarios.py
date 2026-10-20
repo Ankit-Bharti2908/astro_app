@@ -1,21 +1,12 @@
-"""Scenario eval (§16): multi-turn journeys run against a live /chat, then reviewed.
+"""Scenario eval: multi-turn conversations run against a live /chat, then checked.
 
-Two things are checked per step, and they answer different questions.
+Each step is checked against the API's report of the turn and the brain's contents; an optional
+LLM reviewer checks one statement about the reply where only the wording can show a defect.
 
-**Structural checks** read the API's own report of the turn — the route it took, the language
-it replied in, which memories reached the prompt — and the Shared Brain afterwards. These are
-exact: a memory is in the graph or it is not. They catch the failures that matter most and
-cannot be argued with.
-
-**The reviewer** reads the reply itself and answers one statement about it, because the thing a
-user actually notices is not in any field. "Two contradictory goals are active" is a graph
-state; "the assistant told me I'm both switching jobs and not switching jobs" is the defect.
-Only the second one is what the user experiences, and only prose can carry it.
-
-    python -m eval.run_scenarios                      # everything, with the reviewer
+    python -m eval.run_scenarios                      # all scenarios, with the reviewer
     python -m eval.run_scenarios --only B07,B08       # a subset
-    python -m eval.run_scenarios --no-judge           # structural only, no reviewer calls
-    python -m eval.run_scenarios --base-url http://localhost:8000
+    python -m eval.run_scenarios --no-judge           # structural checks only
+    python -m eval.run_scenarios --render-only        # rebuild scenarios.md from the saved JSON
 
 Writes eval/results/scenarios.md and eval/results/scenarios.json.
 """
@@ -324,65 +315,128 @@ class Runner:
 
 # ---- reporting --------------------------------------------------------------------
 
-def to_markdown(results: list[ScenarioResult], meta: dict) -> str:
-    counts = {s: sum(1 for r in results if r.status == s) for s in ("pass", "known", "fail")}
+ICON = {"pass": "✅", "fail": "❌", "known": "⚠️"}
+LABEL = {"pass": "pass", "fail": "**fail**", "known": "known issue"}
+
+
+def _short(text: str, n: int) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+
+def _cell(text: str) -> str:
+    return text.replace("|", "/")
+
+
+def _memories(used: list[str]) -> str:
+    keys = [k.removeprefix("memory:") for k in used if k.startswith("memory:")]
+    return ", ".join(f"`{k}`" for k in keys) or "—"
+
+
+def to_markdown(results: list[dict], specs: dict[str, dict], meta: dict) -> str:
+    """Render a run (as saved in scenarios.json) for a reader with five minutes."""
+    counts = {s: sum(1 for r in results if r["status"] == s) for s in ("pass", "known", "fail")}
+    models = meta["models"]
+    model = models.get("strong") if isinstance(models, dict) else models
+    if isinstance(models, dict) and models.get("small") != models.get("strong"):
+        model = f"{models.get('strong')} / {models.get('small')}"
     lines = [
         "# Scenario eval",
         "",
-        f"{len(results)} multi-turn journeys run against a live `/chat`, "
-        f"{meta['checks']} checks, reviewer `{meta['judge_model']}`.",
-        f"Run {meta['when']} · chat models `{meta['models']}` · brain `{meta['brain']}` · "
-        f"prompts `{meta['prompt_version']}` · {meta['seconds']}s.",
+        f"**{counts['pass']} passed · {counts['known']} known issues · {counts['fail']} failed** — "
+        f"{meta['checks']} checks across {len(results)} conversations",
         "",
-        f"**{counts['pass']} passed · {counts['fail']} failed · {counts['known']} known issue"
-        f"{'s' if counts['known'] != 1 else ''}**",
+        f"Chat model `{model}` · reviewer `{meta['judge_model']}` · brain `{meta['brain']}` · "
+        f"prompts `{meta['prompt_version']}` · {meta['when']} · {meta['seconds']} s",
         "",
-        "Each scenario checks the API's own report of the turn and the Shared Brain afterwards,",
-        "both exactly; a reviewer then reads the reply itself, because what a user notices is the",
-        "prose, not the fields. A scenario marked *known issue* fails for a reason already",
-        "understood and written down — it is listed apart from a regression, not hidden.",
+        "Each scenario is a short conversation. After every message the runner checks the API's report of the turn",
+        "(route, language, which memories reached the prompt) and what the brain now holds. Where only the wording can",
+        "show a defect, an LLM reviewer checks one statement about the reply. A known issue is a failure that is",
+        "already understood; it is listed here rather than hidden. Scenarios: [`scenarios.yaml`](../scenarios.yaml).",
         "",
-        "| | Scenario | Proves | Result |",
-        "|---|---|---|---|",
+        "| | ID | Scenario | What it shows | Checks | Result |",
+        "|---|---|---|---|---|---|",
     ]
-    icon = {"pass": "✅", "fail": "❌", "known": "⚠️"}
     for r in results:
-        verdict = {"pass": "pass", "fail": f"**{len(r.failures)} failed**", "known": "known issue"}[r.status]
-        lines.append(f"| {icon[r.status]} | **{r.id}** {r.title} | {r.proves} | {verdict} |")
-    lines.append("")
+        spec = specs.get(r["id"], {})
+        checks = [c for s in r["steps"] for c in s["checks"]]
+        ok = sum(c["ok"] for c in checks)
+        lines.append(f"| {ICON[r['status']]} | {r['id']} | {r['title']} | {_cell(spec.get('proves', ''))} | "
+                     f"{ok}/{len(checks)} | {LABEL[r['status']]} |")
 
+    open_items = [r for r in results if r["status"] != "pass"]
+    if open_items:
+        lines += ["", "## Known issues and failures", ""]
+        for r in open_items:
+            spec = specs.get(r["id"], {})
+            lines += [f"**{r['id']} — {r['title']}.** " + " ".join((spec.get("known_issue") or "Unexplained failure.").split()), ""]
+            for i, s in enumerate(r["steps"], start=1):
+                for c in s["checks"]:
+                    if not c["ok"]:
+                        what = "reviewer" if c["kind"] == "judge" else c["name"]
+                        lines.append(f"- Step {i}, “{_short(s['say'], 60)}”: {what} — {_short(c['detail'], 160)}")
+            lines.append("")
+
+    lines += ["## Conversations", "", "Expand a scenario to see each message, its route, the memories that reached the "
+              "prompt, and the reply.", ""]
     for r in results:
-        lines += [f"## {icon[r.status]} {r.id} — {r.title}", "", f"*{r.proves}*", ""]
-        if r.known_issue:
-            lines += ["> **Known issue.** " + " ".join(r.known_issue.split()), ""]
-        for i, s in enumerate(r.steps, start=1):
-            lines.append(f"**{i}. “{s.say}”** — `{s.route}` · `{s.language}`"
-                         + (f" · context `{', '.join(s.context_used)}`" if s.context_used else ""))
-            lines.append("")
-            if s.reply:
-                reply = " ".join(s.reply.split())
-                lines += ["> " + (reply[:400] + ("…" if len(reply) > 400 else "")), ""]
-            for c in s.checks:
-                if c.kind == "judge":
-                    lines.append(f"- {'✅' if c.ok else '❌'} *reviewer:* {c.name} — {c.detail}")
-                elif not c.ok:
-                    lines.append(f"- ❌ `{c.name}` — {c.detail}")
-            if any(c.kind != "judge" for c in s.checks) and not s.failures:
-                lines.append(f"- ✅ {sum(1 for c in s.checks if c.kind != 'judge')} structural checks passed")
-            lines.append("")
+        spec = specs.get(r["id"], {})
+        checks = [c for s in r["steps"] for c in s["checks"]]
+        lines += [
+            f"<details><summary>{ICON[r['status']]} <b>{r['id']} — {r['title']}</b> · "
+            f"{sum(c['ok'] for c in checks)}/{len(checks)} checks</summary>",
+            "",
+            f"*{spec.get('proves', '')}*",
+            "",
+            "| # | User says | Route | Memories in prompt | Checks |",
+            "|---|---|---|---|---|",
+        ]
+        for i, s in enumerate(r["steps"], start=1):
+            n_ok = sum(c["ok"] for c in s["checks"])
+            mark = "—" if not s["checks"] else (f"✅ {n_ok}" if n_ok == len(s["checks"]) else f"❌ {n_ok}/{len(s['checks'])}")
+            lines.append(f"| {i} | {_cell(_short(s['say'], 90))} | `{s['route'] or '—'}` | {_memories(s['context_used'])} | {mark} |")
+        lines += ["", "Replies:", ""]
+        for i, s in enumerate(r["steps"], start=1):
+            lines.append(f"{i}. {_short(s['reply'], 220) or '(no reply)'}")
+        notes = [(i, c) for i, s in enumerate(r["steps"], start=1) for c in s["checks"] if c["kind"] == "judge"]
+        if notes:
+            lines += ["", "Reviewer:", ""]
+            for i, c in notes:
+                lines.append(f"- {'✅' if c['ok'] else '❌'} Step {i}: {_short(c['name'], 140)}")
+        lines += ["", "</details>", ""]
     return "\n".join(lines)
 
 
+def load_specs() -> dict[str, dict]:
+    return {s["id"]: s for s in yaml.safe_load((HERE / "scenarios.yaml").read_text())["scenarios"]}
+
+
+def as_json(results: list[ScenarioResult]) -> list[dict]:
+    return [
+        {"id": r.id, "title": r.title, "status": r.status,
+         "steps": [{"say": s.say, "route": s.route, "language": s.language, "context_used": s.context_used,
+                    "reply": s.reply, "checks": [vars(c) for c in s.checks]} for s in r.steps]}
+        for r in results
+    ]
+
+
 async def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--only", default="", help="comma-separated scenario ids")
     ap.add_argument("--no-judge", action="store_true")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--render-only", action="store_true", help="rebuild scenarios.md from scenarios.json, no run")
     args = ap.parse_args()
 
-    spec = yaml.safe_load((HERE / "scenarios.yaml").read_text())
-    scenarios = spec["scenarios"]
+    specs = load_specs()
+    if args.render_only:
+        saved = json.loads((RESULTS / "scenarios.json").read_text())
+        (RESULTS / "scenarios.md").write_text(to_markdown(saved["results"], specs, saved["meta"]))
+        print(f"wrote {RESULTS / 'scenarios.md'}")
+        return 0
+
+    scenarios = list(specs.values())
     if args.only:
         wanted = {s.strip().upper() for s in args.only.split(",")}
         scenarios = [s for s in scenarios if s["id"].upper() in wanted]
@@ -416,19 +470,14 @@ async def main() -> int:
         "seconds": round(time.monotonic() - started),
         "checks": sum(len(s.checks) for r in results for s in r.steps),
     }
+    saved = as_json(results)
     RESULTS.mkdir(exist_ok=True)
-    (RESULTS / "scenarios.md").write_text(to_markdown(results, meta))
-    (RESULTS / "scenarios.json").write_text(json.dumps(
-        {"meta": meta, "results": [
-            {"id": r.id, "title": r.title, "status": r.status,
-             "steps": [{"say": s.say, "route": s.route, "language": s.language,
-                        "context_used": s.context_used, "reply": s.reply,
-                        "checks": [vars(c) for c in s.checks]} for s in r.steps]}
-            for r in results]}, indent=2, default=str))
+    (RESULTS / "scenarios.md").write_text(to_markdown(saved, specs, meta))
+    (RESULTS / "scenarios.json").write_text(json.dumps({"meta": meta, "results": saved}, indent=2, default=str))
 
     counts = {s: sum(1 for r in results if r.status == s) for s in ("pass", "known", "fail")}
-    print(f"\n{counts['pass']} passed · {counts['fail']} failed · {counts['known']} known "
-          f"· {meta['checks']} checks · {meta['seconds']}s")
+    print(f"\n{counts['pass']} passed · {counts['known']} known issues · {counts['fail']} failed "
+          f"· {meta['checks']} checks · {meta['seconds']} s")
     for r in results:
         if r.status == "fail":
             print(f"  ❌ {r.id} {r.title}")

@@ -1,4 +1,4 @@
-"""Memory-graph nodes: extract → score → filter → (Send) reconcile → write (§5)."""
+"""Memory-graph nodes: extract → score → filter → (Send) reconcile → write."""
 
 from __future__ import annotations
 
