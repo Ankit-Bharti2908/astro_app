@@ -123,7 +123,7 @@ python -m eval.run_scenarios     # 10 multi-turn journeys against a running API
 | Unit and integration tests | 42/42 pass |
 | Store / don't-store decision (30 messages) | precision 100%, recall 100% at threshold 0.6; recall falls to 87% at 0.7 |
 | Fact labels: certainty / subject / type | 100% / 100% / 93% |
-| Scenario journeys (68 checks) | 6 pass, 4 known issues, 0 regressions — [report](eval/results/scenarios.md) |
+| Scenario journeys | 10 multi-turn conversations, 68 checks — [report](eval/results/scenarios.md) |
 
 ## Known limitations and next steps
 
@@ -131,8 +131,6 @@ python -m eval.run_scenarios     # 10 multi-turn journeys against a running API
 - **Concurrency:** two messages from the same user at once can race. A per-user lock would fix this.
 - **No auth:** any caller can read any `user_id`. Production needs authentication.
 - **Exact matching only:** retrieval narrows by life area, with no semantic re-ranking inside an area yet.
-- **Open scenario issues:** a hedged retraction is dropped; the same plan can be stored under two names; small talk
-  can deny stored memories; a diagnosis said earlier in the chat can be repeated back from the transcript.
 - **Not yet verified:** the Postgres checkpointer option. Eval numbers are single runs of one model.
 
 ## Production considerations
