@@ -76,8 +76,12 @@ async def run(thresholds: list[float]) -> dict:
         extra_keys += [(row["item"]["id"], k) for k in got if k not in expected_keys]
     label_acc = {k: round(label_hits[k] / label_total[k], 3) if label_total[k] else None for k in label_total}
 
+    from app.prompts.templates import PROMPT_VERSION
+
     report = {
-        "backend": settings.small_model,
+        "when": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
+        "model": settings.small_model,
+        "prompt_version": PROMPT_VERSION,
         "items": len(items),
         "storage_decision_by_threshold": sweep,
         "default_threshold": "0.6",
@@ -96,7 +100,7 @@ def main() -> None:
     ap.add_argument("--thresholds", default="0.3,0.5,0.6,0.7,0.9")
     args = ap.parse_args()
     report = asyncio.run(run([float(t) for t in args.thresholds.split(",")]))
-    print(f"model={report['backend']} items={report['items']}")
+    print(f"model={report['model']} prompts={report['prompt_version']} items={report['items']}")
     print("threshold  precision  recall  f1     tp fp fn tn")
     for th, m in report["storage_decision_by_threshold"].items():
         print(f"{th:>9}  {m['precision']:9.3f}  {m['recall']:6.3f}  {m['f1']:5.3f}  {m['tp']:2d} {m['fp']:2d} {m['fn']:2d} {m['tn']:2d}")

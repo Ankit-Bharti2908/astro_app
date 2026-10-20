@@ -57,7 +57,7 @@ graph, never the whole transcript.
 
 | Layer | Content | When | Budget |
 |---|---|---|---|
-| **L0 meta** | Date, timezone, reply language | always | 30 |
+| **L0 meta** | Date, timezone, reply language | always | — (fixed) |
 | **L1 profile** | Name, DOB, TOB, birth place, sun sign, language — plus *which* of them are missing | always | 150 |
 | **L1b refused** | Values this message offered that the store rejected (§11) | when non-empty | 150 |
 | **L2 index** | One line per life area: `career: 2 goals · finance: 1 goal` | always | 100 |

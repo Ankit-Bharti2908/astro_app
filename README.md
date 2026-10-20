@@ -62,7 +62,7 @@ Everything is an environment variable (or `.env`); see [`app/config.py`](app/con
 | `LLM_TIMEOUT_S` / `LLM_NUM_RETRIES` | `30` / `1` | Per-call timeout and Router retries before fallback |
 | `LLM_TEMPERATURE_STRUCTURED` / `LLM_TEMPERATURE_REPLY` | `0.0` / `0.4` | Sampling temperature for decision tasks (`analyze`, `extract`, `reconcile`, `summarize`) and for user-facing replies. Decisions are pinned to 0 so routing and conflict resolution are reproducible |
 | `CHECKPOINTER` / `CHECKPOINTER_URL` | `memory` | `memory` (`InMemorySaver`) or `postgres` (`pip install -e ".[postgres]"`) |
-| `BUDGET_*` | 30/150/100/600/300/1200 | Token budgets per prompt layer (§3) |
+| `BUDGET_*` | 150/100/600/300/1200 | Token budgets per prompt layer (§3) |
 | `COMPACT_THRESHOLD_TOKENS` / `KEEP_LAST_MESSAGES` | `1200` / `6` | Session compaction (§8) |
 | `MAX_TOOL_ROUNDS` / `RECURSION_LIMIT` | `2` / `25` | Agent loop bounds (§4, §11) |
 | `CONFIDENCE_THRESHOLD` / `TOP_K_MEMORIES` | `0.6` / `5` | Memory storage threshold and L3 prefetch size (§7) |

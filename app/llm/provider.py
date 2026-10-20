@@ -19,7 +19,6 @@ TASK_TIERS: dict[str, str] = {
     "extract": "small",
     "reconcile": "small",
     "summarize": "small",
-    "memory_cmd": "small",
     "memory_cmd_select": "small",
     # The scenario eval's reviewer (§16): a strong model, because it is judging prose.
     "judge": "strong",

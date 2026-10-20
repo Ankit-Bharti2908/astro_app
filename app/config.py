@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,7 +26,6 @@ class Settings(BaseSettings):
     fallback_model: str = ""
     llm_timeout_s: float = 30.0
     llm_num_retries: int = 1
-    llm_json_mode: bool = False  # ask providers for native JSON mode when they support it
     llm_max_tokens_answer: int = 1024
     llm_max_tokens_small: int = 800
     # Routing, extraction and reconciliation are decisions, not prose: sample them at 0 so the
@@ -39,8 +37,8 @@ class Settings(BaseSettings):
     checkpointer: Literal["memory", "postgres"] = "memory"
     checkpointer_url: str = ""
 
-    # Context budgets (tokens) — §3
-    budget_meta: int = 30
+    # Context budgets (tokens) — §3. L0 has none: it is a fixed sentence we generate, so
+    # there is nothing for a budget to protect against.
     budget_profile: int = 150
     budget_index: int = 100
     budget_memories: int = 600
@@ -61,7 +59,6 @@ class Settings(BaseSettings):
 
     default_timezone: str = "Asia/Kolkata"
     log_level: str = "INFO"
-    prompt_version: str = Field(default="v1")
 
 
 def get_settings(**overrides) -> Settings:

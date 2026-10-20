@@ -192,7 +192,6 @@ class FakeLLM(BaseLLMProvider):
             "followup": self._followup,
             "memory_recall": self._recall,
             "smalltalk": self._smalltalk,
-            "memory_cmd": self._extract,
             "memory_cmd_select": self._memory_cmd_select,
         }.get(task, self._answer)
         return handler(system, user, messages)

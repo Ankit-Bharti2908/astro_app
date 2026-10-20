@@ -1,15 +1,17 @@
 {
-  "backend": "litellm",
+  "when": "2026-10-20 04:03 UTC",
+  "model": "openai/gpt-4o-mini",
+  "prompt_version": "v6",
   "items": 30,
   "storage_decision_by_threshold": {
     "0.3": {
-      "precision": 0.938,
+      "precision": 1.0,
       "recall": 1.0,
-      "f1": 0.968,
+      "f1": 1.0,
       "tp": 15,
-      "fp": 1,
+      "fp": 0,
       "fn": 0,
-      "tn": 14
+      "tn": 15
     },
     "0.5": {
       "precision": 1.0,
@@ -101,19 +103,15 @@
       ],
       [
         12,
-        "health_condition"
+        "health_detail"
       ],
       [
         13,
-        "financial_detail"
+        "salary"
       ],
       [
         21,
         "outdoor_activity"
-      ],
-      [
-        22,
-        "business_startup"
       ],
       [
         23,
