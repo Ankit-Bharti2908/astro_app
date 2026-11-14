@@ -1,4 +1,4 @@
-# MyNaksh Shared Brain
+# Shared Brain
 
 A personalised astrology chat service. It remembers what users tell it in a graph (the **Shared Brain**), picks only the
 memories each question needs, and keeps short-term chat context separate from long-term facts.
